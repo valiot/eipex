@@ -17,6 +17,8 @@ defmodule Eipex.CPF do
           | {:identity, Identity.t()}
           | {:unknown, non_neg_integer(), binary()}
 
+  @known_types [0x0000, 0x00A1, 0x8002, 0x00B2, 0x00B1, 0x8000, 0x8001, 0x000C]
+
   @spec encode([item()]) :: binary()
   def encode(items) do
     body = Enum.map_join(items, &encode_item/1)
@@ -54,7 +56,7 @@ defmodule Eipex.CPF do
   def decode(_), do: {:error, :malformed_cpf}
 
   defp decode_items(<<>>, 0, acc), do: {:ok, Enum.reverse(acc)}
-  defp decode_items(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
+  defp decode_items(_rest, 0, _acc), do: {:error, :malformed_cpf}
 
   defp decode_items(
          <<type::16-little, len::16-little, data::binary-size(len), rest::binary>>,
@@ -91,5 +93,6 @@ defmodule Eipex.CPF do
     end
   end
 
+  defp decode_item(type, _data) when type in @known_types, do: :error
   defp decode_item(type, data), do: {:ok, {:unknown, type, data}}
 end

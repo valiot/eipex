@@ -54,6 +54,17 @@ defmodule Eipex.CPFTest do
              CPF.decode(<<2::16-little, 0x00B2::16-little, 9::16-little, 1>>)
   end
 
+  test "decode rejects known item types with wrong-length payloads" do
+    # connected address (0x00A1) must be exactly 4 bytes; 3 is malformed
+    bin = <<1::16-little, 0x00A1::16-little, 3::16-little, 1, 2, 3>>
+    assert {:error, :malformed_cpf} = CPF.decode(bin)
+  end
+
+  test "decode rejects trailing bytes beyond the declared item count" do
+    bin = <<1::16-little, 0x0000::16-little, 0::16-little, 0xFF>>
+    assert {:error, :malformed_cpf} = CPF.decode(bin)
+  end
+
   # ListIdentity response item body (research §1): version 1, sockaddr (BE),
   # vendor 0x004D, type 0x0C, product 0x77, rev 1.2, status 0, serial 0x99,
   # name "Eipex", state 3.
