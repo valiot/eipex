@@ -14,3 +14,4 @@
 - [Fixed] 64-bit type encode rejects out-of-range integers instead of truncating
 - [Added] Connection Manager codec: Forward Open/Close, Unconnected Send, conn params
 - [Fixed] Connection params encode rejects out-of-range sizes instead of masking
+- [Added] Logix services codec: tag read/write, RMW, MSP, symbol list, templates
