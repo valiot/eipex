@@ -163,24 +163,21 @@ defmodule Eipex.CIP.Logix do
   defp decode_template_attrs(_rest, 0, acc), do: {:ok, acc}
 
   defp decode_template_attrs(<<id::16-little, 0::16-little, rest::binary>>, n, acc) do
-    {key, size} =
-      case id do
-        1 -> {:handle, 2}
-        2 -> {:member_count, 2}
-        4 -> {:definition_size, 4}
-        5 -> {:structure_size, 4}
-      end
-
-    case rest do
-      <<value::little-size(size * 8), tail::binary>> ->
-        decode_template_attrs(tail, n - 1, Map.put(acc, key, value))
-
-      _ ->
-        {:error, :malformed_template}
+    with {key, size} <- attr_key_size(id),
+         <<value::little-size(size * 8), tail::binary>> <- rest do
+      decode_template_attrs(tail, n - 1, Map.put(acc, key, value))
+    else
+      _ -> {:error, :malformed_template}
     end
   end
 
   defp decode_template_attrs(_, _, _), do: {:error, :malformed_template}
+
+  defp attr_key_size(1), do: {:handle, 2}
+  defp attr_key_size(2), do: {:member_count, 2}
+  defp attr_key_size(4), do: {:definition_size, 4}
+  defp attr_key_size(5), do: {:structure_size, 4}
+  defp attr_key_size(_), do: :error
 
   @spec encode_read_template(non_neg_integer(), non_neg_integer(), pos_integer()) :: binary()
   def encode_read_template(template_instance, byte_offset, bytes) do

@@ -15,3 +15,4 @@
 - [Added] Connection Manager codec: Forward Open/Close, Unconnected Send, conn params
 - [Fixed] Connection params encode rejects out-of-range sizes instead of masking
 - [Added] Logix services codec: tag read/write, RMW, MSP, symbol list, templates
+- [Fixed] Template attribute decode returns error on unexpected attribute ids

@@ -134,4 +134,21 @@ defmodule Eipex.CIP.LogixTest do
             }} =
              Logix.decode_template_definition(members <> names, 2)
   end
+
+  test "template attribute reply with unexpected attribute id returns error" do
+    data = <<1::16-little, 9::16-little, 0::16-little, 0xAB, 0xCD>>
+    assert {:error, :malformed_template} = Logix.decode_template_attributes(data)
+  end
+
+  test "write tag fragmented carries type, count, offset and data" do
+    assert Logix.encode_write_tag_fragmented(
+             [symbolic: "CartonSize"],
+             <<0xC4, 0x00>>,
+             1,
+             8,
+             <<0x0E, 0x00, 0x00, 0x00>>
+           ) ==
+             <<0x53, 0x06, 0x91, 0x0A, "CartonSize", 0xC4, 0x00, 0x01, 0x00, 8::32-little, 0x0E,
+               0x00, 0x00, 0x00>>
+  end
 end
