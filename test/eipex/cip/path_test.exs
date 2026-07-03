@@ -51,4 +51,12 @@ defmodule Eipex.CIP.PathTest do
     assert {:error, :malformed_path} = Path.decode(<<0x91, 0x09, "abc">>)
     assert {:error, :malformed_path} = Path.decode(<<0xFF, 0x00>>)
   end
+
+  test "encode rejects symbolic names longer than 255 bytes" do
+    long = String.duplicate("a", 256)
+
+    assert_raise FunctionClauseError, fn ->
+      Path.encode(symbolic: long)
+    end
+  end
 end

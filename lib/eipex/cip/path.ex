@@ -20,7 +20,7 @@ defmodule Eipex.CIP.Path do
   @spec encode([segment()]) :: binary()
   def encode(segments), do: Enum.map_join(segments, &encode_segment/1)
 
-  defp encode_segment({:symbolic, name}) do
+  defp encode_segment({:symbolic, name}) when byte_size(name) in 1..255 do
     pad = if rem(byte_size(name), 2) == 1, do: <<0>>, else: <<>>
     <<0x91, byte_size(name), name::binary, pad::binary>>
   end
