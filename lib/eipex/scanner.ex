@@ -12,7 +12,7 @@ defmodule Eipex.Scanner do
   use GenServer
 
   alias Eipex.{CPF, Encap}
-  alias Eipex.CIP.MessageRouter
+  alias Eipex.CIP.{ConnectionManager, MessageRouter}
 
   @default_port 44_818
   @default_timeout 5_000
@@ -56,6 +56,53 @@ defmodule Eipex.Scanner do
           {:ok, response()} | {:error, term()}
   def generic_message(server, opts) do
     GenServer.call(server, {:request, opts}, :infinity)
+  end
+
+  @spec get_attribute(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) ::
+          {:ok, binary()} | {:error, term()}
+  def get_attribute(server, class, instance, attribute, opts \\ []) do
+    opts =
+      Keyword.merge(opts, service: 0x0E, class: class, instance: instance, attribute: attribute)
+
+    server |> generic_message(opts) |> unwrap_cip()
+  end
+
+  @spec get_attributes_all(GenServer.server(), non_neg_integer(), non_neg_integer(), keyword()) ::
+          {:ok, binary()} | {:error, term()}
+  def get_attributes_all(server, class, instance, opts \\ []) do
+    opts = Keyword.merge(opts, service: 0x01, class: class, instance: instance)
+    server |> generic_message(opts) |> unwrap_cip()
+  end
+
+  @spec set_attribute(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          binary(),
+          keyword()
+        ) ::
+          :ok | {:error, term()}
+  def set_attribute(server, class, instance, attribute, data, opts \\ []) do
+    opts =
+      Keyword.merge(opts,
+        service: 0x10,
+        class: class,
+        instance: instance,
+        attribute: attribute,
+        data: data
+      )
+
+    case server |> generic_message(opts) |> unwrap_cip() do
+      {:ok, _data} -> :ok
+      error -> error
+    end
   end
 
   # -- GenServer ---------------------------------------------------------------
@@ -163,6 +210,13 @@ defmodule Eipex.Scanner do
 
   # -- Option normalization ------------------------------------------------------
 
+  defp unwrap_cip({:ok, %{status_name: :success, data: data}}), do: {:ok, data}
+
+  defp unwrap_cip({:ok, %{status_name: name, extended: extended}}),
+    do: {:error, {:cip, name, extended}}
+
+  defp unwrap_cip({:error, _} = error), do: error
+
   defp normalize_host(host) when is_binary(host), do: String.to_charlist(host)
   defp normalize_host(host), do: host
 
@@ -172,13 +226,25 @@ defmodule Eipex.Scanner do
 
   # -- Request pipeline ----------------------------------------------------------
 
-  defp build_request(opts, _state) do
+  defp build_request(opts, state) do
     with {:ok, service} <- Keyword.fetch(opts, :service),
          {:ok, path} <- request_path(opts) do
-      {:ok, MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))}
+      mr = MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))
+
+      case request_route(opts, state) do
+        :none -> {:ok, mr}
+        route -> {:ok, ConnectionManager.encode_unconnected_send(mr, route, [])}
+      end
     else
       :error -> {:error, :missing_service}
       {:error, _} = error -> error
+    end
+  end
+
+  defp request_route(opts, state) do
+    case Keyword.fetch(opts, :route_path) do
+      {:ok, route} -> normalize_route(route)
+      :error -> state.route_path
     end
   end
 

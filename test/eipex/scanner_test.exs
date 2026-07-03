@@ -183,4 +183,106 @@ defmodule Eipex.ScannerTest do
       Scanner.close(pid)
     end
   end
+
+  # Splits an Unconnected Send request payload into {embedded_mr, route_path_bytes}.
+  defp unwrap_unconnected_send(data) do
+    <<_ptt, _ticks, size::16-little, embedded::binary-size(size), rest::binary>> = data
+    rest = if rem(size, 2) == 1, do: binary_part(rest, 1, byte_size(rest) - 1), else: rest
+    <<route_words, 0x00, route::binary-size(route_words * 2)>> = rest
+    {embedded, route}
+  end
+
+  describe "route_path" do
+    test "wraps requests in Unconnected Send and replies with the embedded response" do
+      handler = fn mr ->
+        {:ok, %{service: 0x52, path: <<0x20, 0x06, 0x24, 0x01>>, data: data}} =
+          MessageRouter.decode_request(mr)
+
+        {embedded, route} = unwrap_unconnected_send(data)
+        assert route == <<0x01, 0x00>>
+
+        {:ok, %{service: 0x0E}} = MessageRouter.decode_request(embedded)
+        MessageRouter.encode_response(0x0E, 0x00, data: <<0x63>>)
+      end
+
+      target = ScriptedTarget.start(handler)
+      pid = start_scanner(target, route_path: [backplane: 0])
+
+      assert {:ok, %{status_name: :success, data: <<0x63>>}} =
+               Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1, attribute: 7)
+
+      Scanner.close(pid)
+    end
+
+    test "per-request route_path overrides the session default" do
+      handler = fn mr ->
+        {:ok, %{service: service}} = MessageRouter.decode_request(mr)
+        # session default is :none, so this arrives unwrapped
+        assert service == 0x0E
+        MessageRouter.encode_response(0x0E, 0x00, data: <<1>>)
+      end
+
+      target = ScriptedTarget.start(handler)
+      pid = start_scanner(target, route_path: :none)
+
+      assert {:ok, _} =
+               Scanner.generic_message(pid,
+                 service: 0x0E,
+                 class: 1,
+                 instance: 1,
+                 route_path: :none
+               )
+
+      Scanner.close(pid)
+    end
+  end
+
+  describe "attribute helpers" do
+    test "get_attribute returns the raw attribute data" do
+      target = ScriptedTarget.start(get_attr_handler(<<0x4D, 0x00>>))
+      pid = start_scanner(target)
+
+      assert {:ok, <<0x4D, 0x00>>} = Scanner.get_attribute(pid, 0x01, 1, 1)
+      Scanner.close(pid)
+    end
+
+    test "get_attribute surfaces CIP errors as error tuples" do
+      handler = fn _mr -> MessageRouter.encode_response(0x0E, 0x14, extended: [0x0001]) end
+      target = ScriptedTarget.start(handler)
+      pid = start_scanner(target)
+
+      assert {:error, {:cip, :attribute_not_supported, [0x0001]}} =
+               Scanner.get_attribute(pid, 0x01, 1, 99)
+
+      Scanner.close(pid)
+    end
+
+    test "set_attribute returns :ok on success" do
+      handler = fn mr ->
+        {:ok, %{service: 0x10, data: <<0x01>>}} = MessageRouter.decode_request(mr)
+        MessageRouter.encode_response(0x10, 0x00)
+      end
+
+      target = ScriptedTarget.start(handler)
+      pid = start_scanner(target)
+
+      assert :ok = Scanner.set_attribute(pid, 0xF5, 1, 8, <<0x01>>)
+      Scanner.close(pid)
+    end
+
+    test "get_attributes_all uses service 0x01 without an attribute segment" do
+      handler = fn mr ->
+        {:ok, %{service: 0x01, path: <<0x20, 0x01, 0x24, 0x01>>}} =
+          MessageRouter.decode_request(mr)
+
+        MessageRouter.encode_response(0x01, 0x00, data: <<9, 9>>)
+      end
+
+      target = ScriptedTarget.start(handler)
+      pid = start_scanner(target)
+
+      assert {:ok, <<9, 9>>} = Scanner.get_attributes_all(pid, 0x01, 1)
+      Scanner.close(pid)
+    end
+  end
 end
