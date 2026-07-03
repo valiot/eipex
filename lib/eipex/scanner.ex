@@ -55,8 +55,7 @@ defmodule Eipex.Scanner do
   @spec generic_message(GenServer.server(), keyword()) ::
           {:ok, response()} | {:error, term()}
   def generic_message(server, opts) do
-    timeout = Keyword.get(opts, :timeout, @default_timeout)
-    GenServer.call(server, {:request, opts}, timeout + 1_000)
+    GenServer.call(server, {:request, opts}, :infinity)
   end
 
   # -- GenServer ---------------------------------------------------------------

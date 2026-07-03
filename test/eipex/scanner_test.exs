@@ -165,5 +165,22 @@ defmodule Eipex.ScannerTest do
 
       Scanner.close(pid)
     end
+
+    test "request timeout defaults to the session timeout" do
+      target = ScriptedTarget.start(fn _ -> :no_reply end)
+
+      {:ok, pid} =
+        Scanner.start_link(host: {127, 0, 0, 1}, port: target.port, timeout: 200)
+
+      {elapsed_us, result} =
+        :timer.tc(fn ->
+          Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1)
+        end)
+
+      assert {:error, :timeout} = result
+      assert elapsed_us < 2_000_000
+
+      Scanner.close(pid)
+    end
   end
 end
