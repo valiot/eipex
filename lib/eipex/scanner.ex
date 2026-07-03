@@ -11,7 +11,8 @@ defmodule Eipex.Scanner do
 
   use GenServer
 
-  alias Eipex.Encap
+  alias Eipex.{CPF, Encap}
+  alias Eipex.CIP.MessageRouter
 
   @default_port 44_818
   @default_timeout 5_000
@@ -43,6 +44,21 @@ defmodule Eipex.Scanner do
   @spec close(GenServer.server()) :: :ok
   def close(server), do: GenServer.call(server, :close)
 
+  @type response :: %{
+          service: byte(),
+          status: byte(),
+          status_name: atom(),
+          extended: [non_neg_integer()],
+          data: binary()
+        }
+
+  @spec generic_message(GenServer.server(), keyword()) ::
+          {:ok, response()} | {:error, term()}
+  def generic_message(server, opts) do
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
+    GenServer.call(server, {:request, opts}, timeout + 1_000)
+  end
+
   # -- GenServer ---------------------------------------------------------------
 
   @impl true
@@ -71,6 +87,23 @@ defmodule Eipex.Scanner do
   end
 
   @impl true
+  def handle_call({:request, opts}, from, state) do
+    case build_request(opts, state) do
+      {:ok, mr} ->
+        timeout = Keyword.get(opts, :timeout, state.timeout)
+
+        if state.pending do
+          {:noreply, %{state | queue: :queue.in({from, mr, timeout}, state.queue)}}
+        else
+          {:noreply, send_request(state, from, mr, timeout)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
   def handle_call(:close, _from, state) do
     _ = :gen_tcp.send(state.socket, Encap.encode(Encap.unregister_session(state.session_handle)))
     :gen_tcp.close(state.socket)
@@ -78,10 +111,21 @@ defmodule Eipex.Scanner do
   end
 
   @impl true
-  def handle_info({:tcp, socket, _data}, %State{socket: socket} = state) do
-    # Request/response handling arrives in Task 2; reactivate for now.
+  def handle_info({:tcp, socket, data}, %State{socket: socket} = state) do
+    state = drain_frames(%{state | buffer: state.buffer <> data})
     :ok = :inet.setopts(socket, active: :once)
     {:noreply, state}
+  end
+
+  def handle_info({:request_timeout, context}, state) do
+    case state.pending do
+      {from, ^context, _timer} ->
+        GenServer.reply(from, {:error, :timeout})
+        {:noreply, next_request(%{state | pending: nil})}
+
+      _ ->
+        {:noreply, state}
+    end
   end
 
   def handle_info({:tcp_closed, socket}, %State{socket: socket} = state) do
@@ -126,4 +170,101 @@ defmodule Eipex.Scanner do
   defp normalize_route(:none), do: :none
   defp normalize_route(backplane: slot), do: [{:port, 1, slot}]
   defp normalize_route(segments) when is_list(segments), do: segments
+
+  # -- Request pipeline ----------------------------------------------------------
+
+  defp build_request(opts, _state) do
+    with {:ok, service} <- Keyword.fetch(opts, :service),
+         {:ok, path} <- request_path(opts) do
+      {:ok, MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))}
+    else
+      :error -> {:error, :missing_service}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp request_path(opts) do
+    cond do
+      path = opts[:path] ->
+        {:ok, path}
+
+      name = opts[:symbolic] ->
+        {:ok, [{:symbolic, name}]}
+
+      class = opts[:class] ->
+        base = [{:class, class}, {:instance, Keyword.get(opts, :instance, 1)}]
+
+        case opts[:attribute] do
+          nil -> {:ok, base}
+          attribute -> {:ok, base ++ [{:attribute, attribute}]}
+        end
+
+      true ->
+        {:error, :missing_path}
+    end
+  end
+
+  defp send_request(state, from, mr, timeout) do
+    context = <<state.context_counter::64-little>>
+    cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
+
+    frame = %Encap{
+      Encap.send_rr_data(state.session_handle, cpf)
+      | sender_context: context
+    }
+
+    :ok = :gen_tcp.send(state.socket, Encap.encode(frame))
+    timer = Process.send_after(self(), {:request_timeout, context}, timeout)
+
+    %{state | pending: {from, context, timer}, context_counter: state.context_counter + 1}
+  end
+
+  defp next_request(%State{pending: nil} = state) do
+    case :queue.out(state.queue) do
+      {{:value, {from, mr, timeout}}, queue} ->
+        send_request(%{state | queue: queue}, from, mr, timeout)
+
+      {:empty, _} ->
+        state
+    end
+  end
+
+  # -- Inbound frames --------------------------------------------------------------
+
+  defp drain_frames(state) do
+    case Encap.decode(state.buffer) do
+      {:ok, frame, rest} ->
+        %{state | buffer: rest} |> handle_frame(frame) |> drain_frames()
+
+      :partial ->
+        state
+    end
+  end
+
+  defp handle_frame(
+         %State{pending: {from, context, timer}} = state,
+         %Encap{command: :send_rr_data, sender_context: context} = frame
+       ) do
+    Process.cancel_timer(timer)
+    GenServer.reply(from, decode_reply(frame))
+    next_request(%{state | pending: nil})
+  end
+
+  defp handle_frame(state, %Encap{}), do: state
+
+  defp decode_reply(%Encap{status: 0} = frame) do
+    with {:ok, cpf} <- Encap.unwrap_cpf(frame),
+         {:ok, items} <- CPF.decode(cpf),
+         [mr | _] <- for({:unconnected_data, d} <- items, do: d),
+         {:ok, response} <- MessageRouter.decode_response(mr) do
+      {:ok, response}
+    else
+      [] -> {:error, :no_data_item}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp decode_reply(%Encap{status: status}) do
+    {:error, {:encap, Encap.status_name(status)}}
+  end
 end

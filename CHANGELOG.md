@@ -19,3 +19,4 @@
 - [Fixed] Non-finite float decode, unknown encap command context, encode size guards
 - [Added] Property-based roundtrip tests for EPATH and CIP types
 - [Added] Scanner session lifecycle (RegisterSession over TCP) and scripted test target
+- [Added] Scanner generic_message: UCMM requests with correlation, queueing and timeouts
