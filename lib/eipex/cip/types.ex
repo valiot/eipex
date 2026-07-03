@@ -38,17 +38,20 @@ defmodule Eipex.CIP.Types do
   def encode(:sint, v) when v in -128..127, do: {:ok, <<v::8-signed>>}
   def encode(:int, v) when v in -32_768..32_767, do: {:ok, <<v::16-little-signed>>}
   def encode(:dint, v) when v in -2_147_483_648..2_147_483_647, do: {:ok, <<v::32-little-signed>>}
-  def encode(:lint, v) when is_integer(v), do: {:ok, <<v::64-little-signed>>}
+
+  def encode(:lint, v) when v in -9_223_372_036_854_775_808..9_223_372_036_854_775_807,
+    do: {:ok, <<v::64-little-signed>>}
+
   def encode(:usint, v) when v in 0..255, do: {:ok, <<v::8>>}
   def encode(:uint, v) when v in 0..65_535, do: {:ok, <<v::16-little>>}
   def encode(:udint, v) when v in 0..4_294_967_295, do: {:ok, <<v::32-little>>}
-  def encode(:ulint, v) when is_integer(v) and v >= 0, do: {:ok, <<v::64-little>>}
+  def encode(:ulint, v) when v in 0..18_446_744_073_709_551_615, do: {:ok, <<v::64-little>>}
   def encode(:real, v) when is_number(v), do: {:ok, <<v::32-little-float>>}
   def encode(:lreal, v) when is_number(v), do: {:ok, <<v::64-little-float>>}
   def encode(:byte, v) when v in 0..255, do: {:ok, <<v::8>>}
   def encode(:word, v) when v in 0..65_535, do: {:ok, <<v::16-little>>}
   def encode(:dword, v) when v in 0..4_294_967_295, do: {:ok, <<v::32-little>>}
-  def encode(:lword, v) when is_integer(v) and v >= 0, do: {:ok, <<v::64-little>>}
+  def encode(:lword, v) when v in 0..18_446_744_073_709_551_615, do: {:ok, <<v::64-little>>}
 
   def encode(:short_string, s) when is_binary(s) and byte_size(s) < 256,
     do: {:ok, <<byte_size(s), s::binary>>}

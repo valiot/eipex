@@ -66,4 +66,12 @@ defmodule Eipex.CIP.TypesTest do
     assert %{system?: true} = Types.decode_symbol_type(0x1000)
     assert %{atomic_type: :bool, bool_position: 3} = Types.decode_symbol_type(0x03C1)
   end
+
+  test "encode rejects out-of-64-bit-range values instead of truncating" do
+    assert {:error, :bad_value} = Types.encode(:lint, 99_999_999_999_999_999_999)
+    assert {:error, :bad_value} = Types.encode(:lint, -99_999_999_999_999_999_999)
+    assert {:error, :bad_value} = Types.encode(:ulint, 18_446_744_073_709_551_616)
+    assert {:error, :bad_value} = Types.encode(:lword, 18_446_744_073_709_551_616)
+    assert {:ok, _} = Types.encode(:ulint, 18_446_744_073_709_551_615)
+  end
 end

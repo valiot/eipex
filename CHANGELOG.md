@@ -11,3 +11,4 @@
 - [Fixed] EPATH symbolic encode raises on names longer than 255 bytes
 - [Added] Message Router request/response codec with CIP general status table
 - [Added] CIP elementary type codec and Logix 16-bit symbol type decoder
+- [Fixed] 64-bit type encode rejects out-of-range integers instead of truncating
