@@ -5,3 +5,4 @@
 - [Added] Project scaffold with mise toolchain and test-only StreamData dependency
 - [Added] Encapsulation header codec with the 8 EtherNet/IP commands and status codes
 - [Added] Encapsulation command builders (RegisterSession, SendRRData, SendUnitData, ListIdentity)
+- [Added] CPF item codec and ListIdentity identity item (big-endian sockaddr handling)
