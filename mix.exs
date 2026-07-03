@@ -8,6 +8,7 @@ defmodule Eipex.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      elixirc_paths: elixirc_paths(Mix.env()),
       description: "EtherNet/IP (CIP) protocol stack: scanner and adapter roles",
       package: [licenses: ["Apache-2.0"], links: %{}]
     ]
@@ -22,4 +23,7 @@ defmodule Eipex.MixProject do
       {:stream_data, "~> 1.1", only: [:dev, :test]}
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 end

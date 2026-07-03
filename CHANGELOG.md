@@ -18,3 +18,4 @@
 - [Fixed] Template attribute decode returns error on unexpected attribute ids
 - [Fixed] Non-finite float decode, unknown encap command context, encode size guards
 - [Added] Property-based roundtrip tests for EPATH and CIP types
+- [Added] Scanner session lifecycle (RegisterSession over TCP) and scripted test target
