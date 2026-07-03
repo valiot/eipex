@@ -29,7 +29,7 @@ defmodule Eipex.PropertyTest do
                 tuple({constant(:int), integer(-32_768..32_767)}),
                 tuple({constant(:dint), integer(-2_147_483_648..2_147_483_647)}),
                 tuple({constant(:udint), integer(0..4_294_967_295)}),
-                tuple({constant(:real), float()})
+                tuple({constant(:real), float(min: -3.0e38, max: 3.0e38)})
               ])
           ) do
       {:ok, bin} = Types.encode(type, value)
