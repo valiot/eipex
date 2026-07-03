@@ -15,7 +15,7 @@
 - All committed content (code, comments, docs, commit messages, CHANGELOG) in English.
 - Zero runtime dependencies. Test-only deps allowed (`stream_data`).
 - All multi-byte fields little-endian **except** sockaddr structs (big-endian) — trap #1.
-- Codecs never raise on malformed input: return `{:error, reason}`. `decode` of a stream may return `:partial`.
+- Codecs never raise on malformed **network** input: `decode`/`decode_*` functions return `{:error, reason}` (stream decode may return `:partial`). `encode`/`encode_*` functions take programmer-built terms and may raise on invalid arguments (idiomatic `FunctionClauseError`/`KeyError`).
 - Run `mix format` before every commit.
 - Every commit appends one line to `CHANGELOG.md`: format `[Type] What changed`, max 100 chars, no rationale.
 - TDD: write the failing test first, watch it fail, implement, watch it pass, commit.
