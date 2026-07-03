@@ -65,20 +65,20 @@ defmodule Eipex.CIP.ConnectionManager do
   @priorities [low: 0, high: 1, scheduled: 2, urgent: 3]
 
   @spec encode_params(:standard | :large, map()) :: binary()
-  def encode_params(:standard, p) do
+  def encode_params(:standard, %{size: size} = p) when size in 0..0x1FF do
     value =
       owner_bit(p.owner) <<< 15 ||| Keyword.fetch!(@conn_types, p.type) <<< 13 |||
         Keyword.fetch!(@priorities, p.priority) <<< 10 |||
-        size_bit(p.size_type) <<< 9 ||| (p.size &&& 0x1FF)
+        size_bit(p.size_type) <<< 9 ||| size
 
     <<value::16-little>>
   end
 
-  def encode_params(:large, p) do
+  def encode_params(:large, %{size: size} = p) when size in 0..0xFFFF do
     value =
       owner_bit(p.owner) <<< 31 ||| Keyword.fetch!(@conn_types, p.type) <<< 29 |||
         Keyword.fetch!(@priorities, p.priority) <<< 26 |||
-        size_bit(p.size_type) <<< 25 ||| (p.size &&& 0xFFFF)
+        size_bit(p.size_type) <<< 25 ||| size
 
     <<value::32-little>>
   end

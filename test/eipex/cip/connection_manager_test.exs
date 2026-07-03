@@ -152,4 +152,24 @@ defmodule Eipex.CIP.ConnectionManagerTest do
     assert CM.timeout_factor(0) == 4
     assert CM.timeout_factor(2) == 16
   end
+
+  test "encode_params rejects sizes beyond the variant's field width" do
+    params = %{
+      owner: :exclusive,
+      type: :point_to_point,
+      priority: :low,
+      size_type: :variable,
+      size: 1000
+    }
+
+    # 1000 > 0x1FF: must raise, not silently wrap to 488
+    assert_raise FunctionClauseError, fn -> CM.encode_params(:standard, params) end
+
+    # but fits in the large (16-bit) field
+    assert CM.encode_params(:large, %{params | size: 1000}) |> byte_size() == 4
+
+    assert_raise FunctionClauseError, fn ->
+      CM.encode_params(:large, %{params | size: 0x10000})
+    end
+  end
 end

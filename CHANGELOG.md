@@ -13,3 +13,4 @@
 - [Added] CIP elementary type codec and Logix 16-bit symbol type decoder
 - [Fixed] 64-bit type encode rejects out-of-range integers instead of truncating
 - [Added] Connection Manager codec: Forward Open/Close, Unconnected Send, conn params
+- [Fixed] Connection params encode rejects out-of-range sizes instead of masking
