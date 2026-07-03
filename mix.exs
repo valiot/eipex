@@ -1,0 +1,25 @@
+defmodule Eipex.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :eipex,
+      version: "0.1.0",
+      elixir: "~> 1.15",
+      start_permanent: Mix.env() == :prod,
+      deps: deps(),
+      description: "EtherNet/IP (CIP) protocol stack: scanner and adapter roles",
+      package: [licenses: ["Apache-2.0"], links: %{}]
+    ]
+  end
+
+  def application do
+    [extra_applications: [:logger]]
+  end
+
+  defp deps do
+    [
+      {:stream_data, "~> 1.1", only: [:dev, :test]}
+    ]
+  end
+end

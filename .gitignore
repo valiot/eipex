@@ -1,0 +1,14 @@
+# Build artifacts and dependencies
+/_build/
+/cover/
+/deps/
+/doc/
+
+# Misc
+erl_crash.dump
+*.ez
+eipex-*.tar
+/tmp/
+
+# SDD scratch
+.superpowers/
