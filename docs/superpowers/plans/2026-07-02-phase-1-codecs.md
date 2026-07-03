@@ -1412,9 +1412,9 @@ defmodule Eipex.CIP.ConnectionManagerTest do
   test "network params bit layout, 16-bit (standard FO)" do
     params = %{owner: :exclusive, type: :point_to_point, priority: :low,
                size_type: :variable, size: 500}
-    # p2p = 2<<13 (0x4000), variable = 1<<9 (0x0200), size 500 = 0x1F4 → 0x45F4
-    assert CM.encode_params(:standard, params) == <<0xF4, 0x45>>
-    assert CM.decode_params(:standard, <<0xF4, 0x45>>) == params
+    # p2p = 2<<13 (0x4000), variable = 1<<9 (0x0200), size 500 = 0x1F4 → 0x43F4
+    assert CM.encode_params(:standard, params) == <<0xF4, 0x43>>
+    assert CM.decode_params(:standard, <<0xF4, 0x43>>) == params
   end
 
   test "network params bit layout, 32-bit (large FO)" do
