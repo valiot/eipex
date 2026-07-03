@@ -74,4 +74,22 @@ defmodule Eipex.CIP.TypesTest do
     assert {:error, :bad_value} = Types.encode(:lword, 18_446_744_073_709_551_616)
     assert {:ok, _} = Types.encode(:ulint, 18_446_744_073_709_551_615)
   end
+
+  test "decode_typed represents non-finite floats instead of crashing" do
+    nan32 = <<0x00, 0x00, 0xC0, 0x7F>>
+    assert {:ok, {:real, :nan}} = Types.decode_typed(<<0xCA, 0x00>> <> nan32)
+
+    pos_inf32 = <<0x00, 0x00, 0x80, 0x7F>>
+    neg_inf32 = <<0x00, 0x00, 0x80, 0xFF>>
+    assert {:ok, :infinity} = Types.decode(:real, pos_inf32)
+    assert {:ok, :neg_infinity} = Types.decode(:real, neg_inf32)
+
+    neg_inf64 = <<0, 0, 0, 0, 0, 0, 0xF0, 0xFF>>
+    assert {:ok, :neg_infinity} = Types.decode(:lreal, neg_inf64)
+  end
+
+  test "decode_symbol_type returns :error for bad input shapes" do
+    assert :error = Types.decode_symbol_type(<<1>>)
+    assert :error = Types.decode_symbol_type(:not_a_type)
+  end
 end

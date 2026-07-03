@@ -70,7 +70,9 @@ defmodule Eipex.CIP.Types do
   def decode(:udint, <<v::32-little>>), do: {:ok, v}
   def decode(:ulint, <<v::64-little>>), do: {:ok, v}
   def decode(:real, <<v::32-little-float>>), do: {:ok, v}
+  def decode(:real, <<bits::32-little>>), do: {:ok, non_finite(bits, 23, 0xFF)}
   def decode(:lreal, <<v::64-little-float>>), do: {:ok, v}
+  def decode(:lreal, <<bits::64-little>>), do: {:ok, non_finite(bits, 52, 0x7FF)}
   def decode(:byte, <<v::8>>), do: {:ok, v}
   def decode(:word, <<v::16-little>>), do: {:ok, v}
   def decode(:dword, <<v::32-little>>), do: {:ok, v}
@@ -113,8 +115,10 @@ defmodule Eipex.CIP.Types do
 
     case payload do
       <<chunk::binary-size(size), rest::binary>> ->
-        {:ok, value} = decode(name, chunk)
-        decode_elements(name, rest, [value | acc])
+        case decode(name, chunk) do
+          {:ok, value} -> decode_elements(name, rest, [value | acc])
+          {:error, _} = error -> error
+        end
 
       _ ->
         {:error, :bad_value}
@@ -126,8 +130,22 @@ defmodule Eipex.CIP.Types do
   defp element_size(name) when name in [:dint, :udint, :dword, :real], do: 4
   defp element_size(name) when name in [:lint, :ulint, :lword, :lreal], do: 8
 
+  defp non_finite(bits, frac_bits, exp_mask) do
+    import Bitwise
+    sign_shift = frac_bits + exp_bits(exp_mask)
+
+    cond do
+      (bits &&& (1 <<< frac_bits) - 1) != 0 -> :nan
+      bits >>> sign_shift == 1 -> :neg_infinity
+      true -> :infinity
+    end
+  end
+
+  defp exp_bits(0xFF), do: 8
+  defp exp_bits(0x7FF), do: 11
+
   @doc "Decodes the Logix 16-bit symbol type word (1756-PM020 p.50)."
-  @spec decode_symbol_type(non_neg_integer() | <<_::16>>) :: map()
+  @spec decode_symbol_type(term()) :: map() | :error
   def decode_symbol_type(<<value::16-little>>), do: decode_symbol_type(value)
 
   def decode_symbol_type(value) when is_integer(value) do
@@ -163,4 +181,6 @@ defmodule Eipex.CIP.Types do
       }
     end
   end
+
+  def decode_symbol_type(_), do: :error
 end

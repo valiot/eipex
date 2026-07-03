@@ -11,7 +11,23 @@ defmodule Eipex.Encap do
             options: 0,
             data: <<>>
 
-  @type t :: %__MODULE__{}
+  @typedoc """
+  A known command name (e.g. `:register_session`), or `{:unknown, code}` for
+  any command code this codec doesn't recognize. Unknown commands still
+  decode with the header intact so a caller can reply with encap status
+  0x0001 (invalid command) using the same session handle and sender context,
+  and resync the stream using the declared length.
+  """
+  @type command :: atom() | {:unknown, non_neg_integer()}
+
+  @type t :: %__MODULE__{
+          command: command() | nil,
+          session_handle: non_neg_integer(),
+          status: non_neg_integer(),
+          sender_context: binary(),
+          options: non_neg_integer(),
+          data: binary()
+        }
 
   @commands [
     nop: 0x0000,
@@ -35,7 +51,7 @@ defmodule Eipex.Encap do
   }
 
   @spec encode(t()) :: binary()
-  def encode(%__MODULE__{} = frame) do
+  def encode(%__MODULE__{} = frame) when byte_size(frame.data) <= 0xFFFF do
     code = Keyword.fetch!(@commands, frame.command)
 
     <<code::16-little, byte_size(frame.data)::16-little, frame.session_handle::32-little,
@@ -43,16 +59,12 @@ defmodule Eipex.Encap do
       frame.data::binary>>
   end
 
-  @spec decode(binary()) ::
-          {:ok, t(), binary()} | :partial | {:error, {:unknown_command, integer()}}
+  @spec decode(binary()) :: {:ok, t(), binary()} | :partial
   def decode(
         <<code::16-little, length::16-little, session::32-little, status::32-little,
           context::binary-size(8), options::32-little, rest::binary>>
       ) do
-    case {command_name(code), rest} do
-      {nil, _} ->
-        {:error, {:unknown_command, code}}
-
+    case {command_name(code) || {:unknown, code}, rest} do
       {command, <<data::binary-size(length), tail::binary>>} ->
         {:ok,
          %__MODULE__{

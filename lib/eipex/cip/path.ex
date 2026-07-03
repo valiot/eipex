@@ -49,7 +49,8 @@ defmodule Eipex.CIP.Path do
 
   defp decode_segments(<<>>, acc), do: {:ok, Enum.reverse(acc)}
 
-  defp decode_segments(<<0x91, len, name::binary-size(len), rest::binary>>, acc) do
+  defp decode_segments(<<0x91, len, name::binary-size(len), rest::binary>>, acc)
+       when len > 0 do
     rest = if rem(len, 2) == 1, do: strip_pad(rest), else: rest
 
     case rest do

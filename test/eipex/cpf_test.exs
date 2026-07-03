@@ -65,6 +65,11 @@ defmodule Eipex.CPFTest do
     assert {:error, :malformed_cpf} = CPF.decode(bin)
   end
 
+  test "encode rejects data items larger than the 16-bit length field" do
+    big = :binary.copy(<<0>>, 65_536)
+    assert_raise FunctionClauseError, fn -> CPF.encode([{:unconnected_data, big}]) end
+  end
+
   # ListIdentity response item body (research §1): version 1, sockaddr (BE),
   # vendor 0x004D, type 0x0C, product 0x77, rev 1.2, status 0, serial 0x99,
   # name "Eipex", state 3.

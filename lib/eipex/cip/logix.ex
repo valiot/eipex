@@ -108,7 +108,7 @@ defmodule Eipex.CIP.Logix do
   # -- Symbol object (tag list) ------------------------------------------------
 
   @spec encode_symbol_list(non_neg_integer()) :: binary()
-  def encode_symbol_list(start_instance \\ 0) do
+  def encode_symbol_list(start_instance \\ 0) when start_instance in 0..0xFFFF do
     # Instance always in 16-bit format (like pycomm3): iteration walks past 255
     # quickly and a stable path shape simplifies interop.
     path = <<0x20, @symbol_class, 0x25, 0x00, start_instance::16-little>>

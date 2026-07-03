@@ -16,3 +16,4 @@
 - [Fixed] Connection params encode rejects out-of-range sizes instead of masking
 - [Added] Logix services codec: tag read/write, RMW, MSP, symbol list, templates
 - [Fixed] Template attribute decode returns error on unexpected attribute ids
+- [Fixed] Non-finite float decode, unknown encap command context, encode size guards

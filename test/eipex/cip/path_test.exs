@@ -52,6 +52,10 @@ defmodule Eipex.CIP.PathTest do
     assert {:error, :malformed_path} = Path.decode(<<0xFF, 0x00>>)
   end
 
+  test "decode rejects empty symbolic segments" do
+    assert {:error, :malformed_path} = Path.decode(<<0x91, 0x00>>)
+  end
+
   test "encode rejects symbolic names longer than 255 bytes" do
     long = String.duplicate("a", 256)
 

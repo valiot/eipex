@@ -35,9 +35,29 @@ defmodule Eipex.EncapTest do
     assert :partial = Encap.decode(binary_part(@register_session_frame, 0, 26))
   end
 
-  test "decode rejects unknown commands without raising" do
-    bogus = <<0xFF, 0xFF, 0::16, 0::32, 0::32, 0::64, 0::32>>
-    assert {:error, {:unknown_command, 0xFFFF}} = Encap.decode(bogus)
+  test "decode surfaces unknown commands with the header intact" do
+    bogus =
+      <<0xFF, 0xFF, 2::16-little, 7::32-little, 0::32, 1, 2, 3, 4, 5, 6, 7, 8, 0::32, 0xAB, 0xCD>>
+
+    assert {:ok,
+            %Encap{
+              command: {:unknown, 0xFFFF},
+              session_handle: 7,
+              sender_context: <<1, 2, 3, 4, 5, 6, 7, 8>>,
+              data: <<0xAB, 0xCD>>
+            }, <<>>} = Encap.decode(bogus)
+  end
+
+  test "decode returns :partial for unknown commands with an incomplete body" do
+    bogus = <<0xFF, 0xFF, 2::16-little, 7::32-little, 0::32, 1, 2, 3, 4, 5, 6, 7, 8, 0::32, 0xAB>>
+
+    assert :partial = Encap.decode(bogus)
+  end
+
+  test "encode rejects data larger than the 16-bit length field" do
+    assert_raise FunctionClauseError, fn ->
+      Encap.encode(%Encap{command: :nop, data: :binary.copy(<<0>>, 65_536)})
+    end
   end
 
   test "round-trips every command" do

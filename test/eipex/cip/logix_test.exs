@@ -71,6 +71,10 @@ defmodule Eipex.CIP.LogixTest do
                0x00>>
   end
 
+  test "encode_symbol_list rejects instances beyond 16 bits" do
+    assert_raise FunctionClauseError, fn -> Logix.encode_symbol_list(0x10000) end
+  end
+
   test "symbol list reply parses instances, names and types" do
     data =
       <<0x10::32-little, 5::16-little, "MyTag", 0x00C4::16-little, 0x25::32-little, 3::16-little,

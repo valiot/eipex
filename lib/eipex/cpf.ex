@@ -33,10 +33,10 @@ defmodule Eipex.CPF do
   defp encode_item({:sequenced_address, id, seq}),
     do: <<0x8002::16-little, 8::16-little, id::32-little, seq::32-little>>
 
-  defp encode_item({:unconnected_data, data}),
+  defp encode_item({:unconnected_data, data}) when byte_size(data) <= 0xFFFF,
     do: <<0x00B2::16-little, byte_size(data)::16-little, data::binary>>
 
-  defp encode_item({:connected_data, data}),
+  defp encode_item({:connected_data, data}) when byte_size(data) <= 0xFFFF,
     do: <<0x00B1::16-little, byte_size(data)::16-little, data::binary>>
 
   defp encode_item({:sockaddr_o2t, sa}), do: encode_sockaddr(0x8000, sa)
