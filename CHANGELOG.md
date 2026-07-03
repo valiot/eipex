@@ -10,3 +10,4 @@
 - [Added] EPATH codec: logical, symbolic and port segments with spec padding
 - [Fixed] EPATH symbolic encode raises on names longer than 255 bytes
 - [Added] Message Router request/response codec with CIP general status table
+- [Added] CIP elementary type codec and Logix 16-bit symbol type decoder
