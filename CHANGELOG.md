@@ -8,6 +8,7 @@
 - [Added] Encapsulation command builders (RegisterSession, SendRRData, SendUnitData, ListIdentity)
 - [Added] CPF item codec and ListIdentity identity item (big-endian sockaddr handling)
 - [Fixed] CPF decode rejects malformed known items and trailing bytes after item count
+- [Fixed] route_path override test exercises real precedence
 - [Added] EPATH codec: logical, symbolic and port segments with spec padding
 - [Fixed] EPATH symbolic encode raises on names longer than 255 bytes
 - [Added] Message Router request/response codec with CIP general status table

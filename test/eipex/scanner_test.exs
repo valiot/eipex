@@ -216,16 +216,16 @@ defmodule Eipex.ScannerTest do
 
     test "per-request route_path overrides the session default" do
       handler = fn mr ->
-        {:ok, %{service: service}} = MessageRouter.decode_request(mr)
-        # session default is :none, so this arrives unwrapped
-        assert service == 0x0E
+        # session default would wrap in Unconnected Send (0x52);
+        # the per-request :none override must arrive unwrapped
+        {:ok, %{service: 0x0E}} = MessageRouter.decode_request(mr)
         MessageRouter.encode_response(0x0E, 0x00, data: <<1>>)
       end
 
       target = ScriptedTarget.start(handler)
-      pid = start_scanner(target, route_path: :none)
+      pid = start_scanner(target, route_path: [backplane: 0])
 
-      assert {:ok, _} =
+      assert {:ok, %{status_name: :success}} =
                Scanner.generic_message(pid,
                  service: 0x0E,
                  class: 1,
