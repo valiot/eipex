@@ -66,4 +66,42 @@ defmodule Eipex.EncapTest do
     assert Encap.status_name(0x0069) == :unsupported_protocol_version
     assert Encap.status_name(0x1234) == :unknown
   end
+
+  describe "command builders" do
+    test "register_session carries protocol version 1" do
+      assert %Encap{command: :register_session, session_handle: 0, data: <<1, 0, 0, 0>>} =
+               Encap.register_session()
+    end
+
+    test "unregister_session carries the session handle, no data" do
+      assert %Encap{command: :unregister_session, session_handle: 0xCAFE, data: <<>>} =
+               Encap.unregister_session(0xCAFE)
+    end
+
+    test "list_identity is sessionless and empty" do
+      assert %Encap{command: :list_identity, session_handle: 0, data: <<>>} =
+               Encap.list_identity()
+    end
+
+    test "send_rr_data prefixes interface handle 0 and timeout" do
+      cpf = <<0xDE, 0xAD>>
+      frame = Encap.send_rr_data(0x1234, cpf, 10)
+      assert frame.command == :send_rr_data
+      assert frame.session_handle == 0x1234
+      assert frame.data == <<0::32-little, 10::16-little, 0xDE, 0xAD>>
+    end
+
+    test "send_unit_data uses timeout 0" do
+      frame = Encap.send_unit_data(0x1234, <<0xBE, 0xEF>>)
+      assert frame.data == <<0::32-little, 0::16-little, 0xBE, 0xEF>>
+    end
+
+    test "unwrap_cpf strips the 6-byte interface prefix" do
+      frame = Encap.send_rr_data(1, <<1, 2, 3>>)
+      assert {:ok, <<1, 2, 3>>} = Encap.unwrap_cpf(frame)
+
+      assert {:error, :bad_interface_data} =
+               Encap.unwrap_cpf(%Encap{command: :send_rr_data, data: <<1>>})
+    end
+  end
 end

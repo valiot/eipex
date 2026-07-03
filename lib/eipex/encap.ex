@@ -77,4 +77,44 @@ defmodule Eipex.Encap do
   defp command_name(code) do
     Enum.find_value(@commands, fn {name, c} -> if c == code, do: name end)
   end
+
+  @protocol_version 1
+
+  @spec register_session() :: t()
+  def register_session do
+    %__MODULE__{command: :register_session, data: <<@protocol_version::16-little, 0::16-little>>}
+  end
+
+  @spec unregister_session(non_neg_integer()) :: t()
+  def unregister_session(session_handle) do
+    %__MODULE__{command: :unregister_session, session_handle: session_handle}
+  end
+
+  @spec nop() :: t()
+  def nop, do: %__MODULE__{command: :nop}
+
+  @spec list_identity() :: t()
+  def list_identity, do: %__MODULE__{command: :list_identity}
+
+  @spec send_rr_data(non_neg_integer(), binary(), non_neg_integer()) :: t()
+  def send_rr_data(session_handle, cpf, timeout \\ 0) do
+    %__MODULE__{
+      command: :send_rr_data,
+      session_handle: session_handle,
+      data: <<0::32-little, timeout::16-little, cpf::binary>>
+    }
+  end
+
+  @spec send_unit_data(non_neg_integer(), binary()) :: t()
+  def send_unit_data(session_handle, cpf) do
+    %__MODULE__{
+      command: :send_unit_data,
+      session_handle: session_handle,
+      data: <<0::32-little, 0::16-little, cpf::binary>>
+    }
+  end
+
+  @spec unwrap_cpf(t()) :: {:ok, binary()} | {:error, :bad_interface_data}
+  def unwrap_cpf(%__MODULE__{data: <<_iface::32, _timeout::16, cpf::binary>>}), do: {:ok, cpf}
+  def unwrap_cpf(%__MODULE__{}), do: {:error, :bad_interface_data}
 end
