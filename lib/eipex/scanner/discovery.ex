@@ -17,12 +17,23 @@ defmodule Eipex.Scanner.Discovery do
     port = Keyword.get(opts, :port, @default_port)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
-    with {:ok, socket} <- :gen_udp.open(0, [:binary, active: false, broadcast: true]),
-         :ok <- :gen_udp.send(socket, address, port, Encap.encode(Encap.list_identity())) do
-      deadline = System.monotonic_time(:millisecond) + timeout
-      identities = collect(socket, deadline, [])
-      :gen_udp.close(socket)
-      {:ok, identities}
+    case :gen_udp.open(0, [:binary, active: false, broadcast: true]) do
+      {:ok, socket} ->
+        try do
+          case :gen_udp.send(socket, address, port, Encap.encode(Encap.list_identity())) do
+            :ok ->
+              deadline = System.monotonic_time(:millisecond) + timeout
+              {:ok, collect(socket, deadline, [])}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+        after
+          :gen_udp.close(socket)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

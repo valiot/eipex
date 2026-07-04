@@ -67,4 +67,24 @@ defmodule Eipex.Scanner.DiscoveryTest do
     assert {:ok, []} =
              Eipex.Scanner.discover(address: {127, 0, 0, 1}, port: port, timeout: 200)
   end
+
+  test "send failure returns an error and does not leak the socket" do
+    ports_before = length(:erlang.ports())
+
+    # Run multiple times - if sockets are leaking, port count would keep growing
+    for _ <- 1..5 do
+      assert {:error, :nxdomain} =
+               Discovery.discover(address: ~c"definitely-not-a-host.invalid", timeout: 50)
+    end
+
+    :erlang.garbage_collect()
+    :timer.sleep(100)
+
+    ports_after = length(:erlang.ports())
+
+    # Verify ports haven't accumulated from multiple failures
+    # Should be at most one extra port (from Erlang UDP error handling)
+    assert ports_after <= ports_before + 1,
+           "Socket leak detected: ports went from #{ports_before} to #{ports_after}"
+  end
 end

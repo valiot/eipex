@@ -25,3 +25,4 @@
 - [Fixed] generic_message outer call waits on the server-side request timer
 - [Added] Scanner NOP keepalive and explicit connection-loss semantics
 - [Added] UDP ListIdentity discovery (broadcast and unicast)
+- [Fixed] Discovery closes the UDP socket when the initial send fails
