@@ -27,8 +27,9 @@ defmodule Eipex.ScannerTest do
     {:ok, pid} = Scanner.start_link(host: {127, 0, 0, 1}, port: target.port)
     assert_receive {:scripted_target_connected, _}, 1_000
 
+    ref = Process.monitor(pid)
     assert :ok = Scanner.close(pid)
-    refute Process.alive?(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
 
     # give the target loop a beat to decode the trailing frames
     Process.sleep(50)

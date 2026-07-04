@@ -64,6 +64,6 @@ defmodule Eipex.Interop.CpppoTest do
                data: <<1::16-little>>
              )
 
-    assert_receive {:EXIT, ^plc, {:shutdown, :connection_lost}}
+    assert_receive {:EXIT, ^plc, {:shutdown, :connection_lost}}, 1_000
   end
 end

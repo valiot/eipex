@@ -73,8 +73,8 @@ defmodule Eipex.Scanner.DiscoveryTest do
 
     # Run multiple times - if sockets are leaking, port count would keep growing
     for _ <- 1..5 do
-      assert {:error, :nxdomain} =
-               Discovery.discover(address: ~c"definitely-not-a-host.invalid", timeout: 50)
+      assert {:error, :einval} =
+               Discovery.discover(address: {127, 0, 0, 1}, port: 0, timeout: 50)
     end
 
     :erlang.garbage_collect()
