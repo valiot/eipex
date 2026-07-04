@@ -27,3 +27,4 @@
 - [Added] UDP ListIdentity discovery (broadcast and unicast)
 - [Fixed] Discovery closes the UDP socket when the initial send fails
 - [Added] cpppo interop harness (docker compose + tagged interop tests)
+- [Added] CI workflow (format check + tests) on X64 runner
