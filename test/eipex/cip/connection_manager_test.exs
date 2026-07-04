@@ -172,4 +172,28 @@ defmodule Eipex.CIP.ConnectionManagerTest do
       CM.encode_params(:large, %{params | size: 0x10000})
     end
   end
+
+  test "unconnected send round-trips through decode (odd and even embedded)" do
+    for data <- [<<1, 2, 3>>, <<1, 2>>] do
+      embedded = Eipex.CIP.MessageRouter.encode_request(0x4C, [symbolic: "abc"], data)
+      request = CM.encode_unconnected_send(embedded, [{:port, 1, 0}], timeout_ticks: 7)
+      {:ok, %{service: 0x52, data: payload}} = Eipex.CIP.MessageRouter.decode_request(request)
+
+      assert {:ok,
+              %{
+                embedded: ^embedded,
+                route: <<0x01, 0x00>>,
+                priority_time_tick: 0x0A,
+                timeout_ticks: 7
+              }} =
+               CM.decode_unconnected_send(payload)
+    end
+  end
+
+  test "decode_unconnected_send rejects truncated payloads" do
+    assert {:error, :malformed_unconnected_send} =
+             CM.decode_unconnected_send(<<1, 2, 9::16-little, 1>>)
+
+    assert {:error, :malformed_unconnected_send} = CM.decode_unconnected_send(<<1>>)
+  end
 end

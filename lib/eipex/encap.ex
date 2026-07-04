@@ -52,7 +52,7 @@ defmodule Eipex.Encap do
 
   @spec encode(t()) :: binary()
   def encode(%__MODULE__{} = frame) when byte_size(frame.data) <= 0xFFFF do
-    code = Keyword.fetch!(@commands, frame.command)
+    code = command_code(frame.command)
 
     <<code::16-little, byte_size(frame.data)::16-little, frame.session_handle::32-little,
       frame.status::32-little, frame.sender_context::binary-size(8), frame.options::32-little,
@@ -89,6 +89,9 @@ defmodule Eipex.Encap do
   defp command_name(code) do
     Enum.find_value(@commands, fn {name, c} -> if c == code, do: name end)
   end
+
+  defp command_code({:unknown, code}) when code in 0..0xFFFF, do: code
+  defp command_code(command), do: Keyword.fetch!(@commands, command)
 
   @protocol_version 1
 

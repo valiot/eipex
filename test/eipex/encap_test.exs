@@ -124,4 +124,14 @@ defmodule Eipex.EncapTest do
                Encap.unwrap_cpf(%Encap{command: :send_rr_data, data: <<1>>})
     end
   end
+
+  test "encode emits unknown commands verbatim (for status-0x0001 replies)" do
+    frame = %Encap{command: {:unknown, 0xABCD}, session_handle: 7, status: 0x0001}
+    encoded = Encap.encode(frame)
+
+    assert <<0xABCD::16-little, 0::16-little, 7::32-little, 0x0001::32-little, _::binary>> =
+             encoded
+
+    assert {:ok, ^frame, <<>>} = Encap.decode(encoded)
+  end
 end

@@ -260,6 +260,30 @@ defmodule Eipex.CIP.ConnectionManager do
     MessageRouter.encode_request(0x52, @cm_path, data)
   end
 
+  @spec decode_unconnected_send(binary()) ::
+          {:ok,
+           %{
+             priority_time_tick: byte(),
+             timeout_ticks: byte(),
+             embedded: binary(),
+             route: binary()
+           }}
+          | {:error, :malformed_unconnected_send}
+  def decode_unconnected_send(
+        <<ptt, ticks, size::16-little, embedded::binary-size(size), rest::binary>>
+      ) do
+    pad = rem(size, 2)
+
+    with <<_::binary-size(pad), route_words, _reserved, route::binary-size(route_words * 2)>> <-
+           rest do
+      {:ok, %{priority_time_tick: ptt, timeout_ticks: ticks, embedded: embedded, route: route}}
+    else
+      _ -> {:error, :malformed_unconnected_send}
+    end
+  end
+
+  def decode_unconnected_send(_), do: {:error, :malformed_unconnected_send}
+
   # -- Helpers -----------------------------------------------------------------
 
   @spec ext_status_name(non_neg_integer()) :: atom()
