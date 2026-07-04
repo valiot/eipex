@@ -285,4 +285,48 @@ defmodule Eipex.ScannerTest do
       Scanner.close(pid)
     end
   end
+
+  describe "keepalive and connection loss" do
+    test "sends NOP frames at the configured interval" do
+      target = ScriptedTarget.start(fn _ -> :no_reply end)
+      pid = start_scanner(target, keepalive: 50)
+
+      Process.sleep(180)
+      Scanner.close(pid)
+      Process.sleep(50)
+
+      nops = target |> ScriptedTarget.frames() |> Enum.count(&(&1.command == :nop))
+      assert nops >= 2
+    end
+
+    test "keepalive: :none sends no NOPs" do
+      target = ScriptedTarget.start(fn _ -> :no_reply end)
+      pid = start_scanner(target, keepalive: :none)
+
+      Process.sleep(150)
+      Scanner.close(pid)
+      Process.sleep(50)
+
+      assert target |> ScriptedTarget.frames() |> Enum.count(&(&1.command == :nop)) == 0
+    end
+
+    test "connection loss fails the in-flight caller and stops the process" do
+      Process.flag(:trap_exit, true)
+      target = ScriptedTarget.start(fn _ -> :no_reply end)
+      pid = start_scanner(target)
+      ref = Process.monitor(pid)
+
+      caller =
+        Task.async(fn ->
+          Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1, timeout: 5_000)
+        end)
+
+      # let the request reach the wire, then drop the connection target-side
+      Process.sleep(50)
+      ScriptedTarget.close(target)
+
+      assert {:error, :connection_lost} = Task.await(caller, 1_000)
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :connection_lost}}, 1_000
+    end
+  end
 end

@@ -119,14 +119,15 @@ defmodule Eipex.Scanner do
          {:ok, handle} <- register_session(socket, timeout) do
       :ok = :inet.setopts(socket, active: :once)
 
-      {:ok,
-       %State{
-         socket: socket,
-         session_handle: handle,
-         route_path: opts |> Keyword.get(:route_path, :none) |> normalize_route(),
-         keepalive: Keyword.get(opts, :keepalive, @default_keepalive),
-         timeout: timeout
-       }}
+      state = %State{
+        socket: socket,
+        session_handle: handle,
+        route_path: opts |> Keyword.get(:route_path, :none) |> normalize_route(),
+        keepalive: Keyword.get(opts, :keepalive, @default_keepalive),
+        timeout: timeout
+      }
+
+      {:ok, schedule_keepalive(state)}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -151,6 +152,7 @@ defmodule Eipex.Scanner do
 
   @impl true
   def handle_call(:close, _from, state) do
+    state = fail_callers(state, {:error, :closed})
     _ = :gen_tcp.send(state.socket, Encap.encode(Encap.unregister_session(state.session_handle)))
     :gen_tcp.close(state.socket)
     {:stop, :normal, :ok, state}
@@ -174,12 +176,17 @@ defmodule Eipex.Scanner do
     end
   end
 
+  def handle_info(:keepalive, state) do
+    _ = :gen_tcp.send(state.socket, Encap.encode(Encap.nop()))
+    {:noreply, schedule_keepalive(state)}
+  end
+
   def handle_info({:tcp_closed, socket}, %State{socket: socket} = state) do
-    {:stop, {:shutdown, :connection_lost}, state}
+    {:stop, {:shutdown, :connection_lost}, fail_callers(state, {:error, :connection_lost})}
   end
 
   def handle_info({:tcp_error, socket, _reason}, %State{socket: socket} = state) do
-    {:stop, {:shutdown, :connection_lost}, state}
+    {:stop, {:shutdown, :connection_lost}, fail_callers(state, {:error, :connection_lost})}
   end
 
   # -- Session registration (passive mode, inside init) -------------------------
@@ -331,5 +338,31 @@ defmodule Eipex.Scanner do
 
   defp decode_reply(%Encap{status: status}) do
     {:error, {:encap, Encap.status_name(status)}}
+  end
+
+  # -- Keepalive and loss handling ------------------------------------------------
+
+  defp schedule_keepalive(%State{keepalive: :none} = state), do: state
+
+  defp schedule_keepalive(%State{keepalive: interval} = state) when is_integer(interval) do
+    Process.send_after(self(), :keepalive, interval)
+    state
+  end
+
+  defp fail_callers(state, reply) do
+    case state.pending do
+      {from, _context, timer} ->
+        Process.cancel_timer(timer)
+        GenServer.reply(from, reply)
+
+      nil ->
+        :ok
+    end
+
+    for {from, _mr, _timeout} <- :queue.to_list(state.queue) do
+      GenServer.reply(from, reply)
+    end
+
+    %{state | pending: nil, queue: :queue.new()}
   end
 end

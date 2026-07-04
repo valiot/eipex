@@ -23,3 +23,4 @@
 - [Added] Scanner session lifecycle (RegisterSession over TCP) and scripted test target
 - [Added] Scanner generic_message: UCMM requests with correlation, queueing and timeouts
 - [Fixed] generic_message outer call waits on the server-side request timer
+- [Added] Scanner NOP keepalive and explicit connection-loss semantics
