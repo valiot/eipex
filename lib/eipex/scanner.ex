@@ -44,6 +44,8 @@ defmodule Eipex.Scanner do
   @spec close(GenServer.server()) :: :ok
   def close(server), do: GenServer.call(server, :close)
 
+  defdelegate discover(opts \\ []), to: Eipex.Scanner.Discovery
+
   @type response :: %{
           service: byte(),
           status: byte(),
