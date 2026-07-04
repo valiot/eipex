@@ -42,3 +42,34 @@ Address during Phase 2 unless noted; none block the Phase 1 merge.
 - `Path` decode accepts missing trailing pad on final odd symbolic segment (liberal
   decode; some stacks omit it).
 - MSP builds via two `IO.iodata_to_binary/1` calls (clarity over cleverness).
+
+# Deferred findings from the Phase 2 final review
+
+Carried forward from the whole-branch review of `phase-2-explicit-scanner`
+(2396bc0..145b903). Address in Phase 3+ unless noted.
+
+## Fix during Phase 3/4 work
+
+- **`recv_frame/3` discards bytes after the RegisterSession reply** instead of
+  seeding `state.buffer` — a pipelining target would lose frames (real targets
+  don't pipeline there; one-line thread-through).
+- **Builder raises inside the session kill all queued callers:** a bad
+  `data:`/`symbolic:` (>255 chars) raises in the server. Rescue in
+  `handle_call({:request, ...})` → `{:error, {:invalid_request, reason}}`, or
+  document the blast radius.
+- **Unconnected Send tick defaults (~5.1 s) ignore the per-request timeout** and
+  violate spec §6's ≥10 s unconnected floor — derive `timeout_ticks` from the
+  request timeout when wiring Phase 3/4 (inherited from Phase 1 CM defaults).
+- **Docs pass before any Hex release:** `@doc` on all Scanner public functions;
+  document time-on-wire timeout semantics (queued requests wait longer
+  end-to-end) and the `{:shutdown, :connection_lost}` link contract
+  (supervise or trap exits); add `route_path` to the moduledoc.
+
+## Accepted (no action)
+
+- Keepalive timer left running at shutdown (message to dead pid is a no-op).
+- `for` comprehension used for reply side effects in `fail_callers`.
+- NOP-interval test timing slack (bump sleep only if CI flakes).
+- `discover` defdelegate placement; loose `{:error, term()}` helper specs.
+- New callers racing a dying scanner get standard OTP `:noproc`/exit semantics
+  (only already-queued callers are guaranteed clean error tuples).
