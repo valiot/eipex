@@ -26,3 +26,4 @@
 - [Added] Scanner NOP keepalive and explicit connection-loss semantics
 - [Added] UDP ListIdentity discovery (broadcast and unicast)
 - [Fixed] Discovery closes the UDP socket when the initial send fails
+- [Added] cpppo interop harness (docker compose + tagged interop tests)
