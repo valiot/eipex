@@ -28,3 +28,4 @@
 - [Fixed] Discovery closes the UDP socket when the initial send fails
 - [Added] cpppo interop harness (docker compose + tagged interop tests)
 - [Added] CI workflow (format check + tests) on X64 runner
+- [Fixed] Scanner send failures stop the session with connection_lost instead of crashing

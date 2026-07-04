@@ -70,6 +70,12 @@ defmodule Eipex.TestSupport.ScriptedTarget do
   end
 
   defp handle_frame(socket, %Encap{command: :send_rr_data} = frame, handler, opts) do
+    if opts[:rst_after_reply] do
+      # hold the reply briefly so a concurrent caller has a real window to
+      # queue a second request behind this one before the reset lands
+      Process.sleep(30)
+    end
+
     {:ok, cpf} = Encap.unwrap_cpf(frame)
     {:ok, items} = CPF.decode(cpf)
     [{:unconnected_data, mr_request}] = for {:unconnected_data, _} = i <- items, do: i
@@ -102,6 +108,11 @@ defmodule Eipex.TestSupport.ScriptedTarget do
       :gen_tcp.send(socket, b)
     else
       :gen_tcp.send(socket, binary)
+    end
+
+    if opts[:rst_after_reply] do
+      :inet.setopts(socket, [{:linger, {true, 0}}])
+      :gen_tcp.close(socket)
     end
   end
 end

@@ -25,7 +25,7 @@ defmodule Eipex.Scanner do
               buffer: <<>>,
               pending: nil,
               queue: :queue.new(),
-              context_counter: 0,
+              context_counter: 1,
               route_path: :none,
               keepalive: nil,
               timeout: nil
@@ -115,7 +115,14 @@ defmodule Eipex.Scanner do
     port = Keyword.get(opts, :port, @default_port)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
-    socket_opts = [:binary, packet: :raw, active: false, keepalive: true]
+    socket_opts = [
+      :binary,
+      packet: :raw,
+      active: false,
+      keepalive: true,
+      send_timeout: timeout,
+      send_timeout_close: true
+    ]
 
     with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
          {:ok, handle} <- register_session(socket, timeout) do
@@ -144,7 +151,14 @@ defmodule Eipex.Scanner do
         if state.pending do
           {:noreply, %{state | queue: :queue.in({from, mr, timeout}, state.queue)}}
         else
-          {:noreply, send_request(state, from, mr, timeout)}
+          case send_request(state, from, mr, timeout) do
+            {:ok, state} ->
+              {:noreply, state}
+
+            {:lost, state} ->
+              {:stop, {:shutdown, :connection_lost},
+               fail_callers(state, {:error, :connection_lost})}
+          end
         end
 
       {:error, reason} ->
@@ -162,16 +176,29 @@ defmodule Eipex.Scanner do
 
   @impl true
   def handle_info({:tcp, socket, data}, %State{socket: socket} = state) do
-    state = drain_frames(%{state | buffer: state.buffer <> data})
-    :ok = :inet.setopts(socket, active: :once)
-    {:noreply, state}
+    case drain_frames(%{state | buffer: state.buffer <> data}) do
+      {:ok, state} ->
+        :ok = :inet.setopts(socket, active: :once)
+        {:noreply, state}
+
+      {:lost, state} ->
+        {:stop, {:shutdown, :connection_lost}, fail_callers(state, {:error, :connection_lost})}
+    end
   end
 
   def handle_info({:request_timeout, context}, state) do
     case state.pending do
       {from, ^context, _timer} ->
         GenServer.reply(from, {:error, :timeout})
-        {:noreply, next_request(%{state | pending: nil})}
+
+        case next_request(%{state | pending: nil}) do
+          {:ok, state} ->
+            {:noreply, state}
+
+          {:lost, state} ->
+            {:stop, {:shutdown, :connection_lost},
+             fail_callers(state, {:error, :connection_lost})}
+        end
 
       _ ->
         {:noreply, state}
@@ -199,6 +226,7 @@ defmodule Eipex.Scanner do
            recv_frame(socket, <<>>, timeout) do
       {:ok, handle}
     else
+      {:ok, %Encap{command: command, status: 0}} -> {:error, {:unexpected_reply, command}}
       {:ok, %Encap{status: status}} -> {:error, {:encap, Encap.status_name(status)}}
       {:error, reason} -> {:error, reason}
     end
@@ -287,10 +315,17 @@ defmodule Eipex.Scanner do
       | sender_context: context
     }
 
-    :ok = :gen_tcp.send(state.socket, Encap.encode(frame))
-    timer = Process.send_after(self(), {:request_timeout, context}, timeout)
+    case :gen_tcp.send(state.socket, Encap.encode(frame)) do
+      :ok ->
+        timer = Process.send_after(self(), {:request_timeout, context}, timeout)
 
-    %{state | pending: {from, context, timer}, context_counter: state.context_counter + 1}
+        {:ok,
+         %{state | pending: {from, context, timer}, context_counter: state.context_counter + 1}}
+
+      {:error, _reason} ->
+        GenServer.reply(from, {:error, :connection_lost})
+        {:lost, state}
+    end
   end
 
   defp next_request(%State{pending: nil} = state) do
@@ -299,7 +334,7 @@ defmodule Eipex.Scanner do
         send_request(%{state | queue: queue}, from, mr, timeout)
 
       {:empty, _} ->
-        state
+        {:ok, state}
     end
   end
 
@@ -308,10 +343,13 @@ defmodule Eipex.Scanner do
   defp drain_frames(state) do
     case Encap.decode(state.buffer) do
       {:ok, frame, rest} ->
-        %{state | buffer: rest} |> handle_frame(frame) |> drain_frames()
+        case handle_frame(%{state | buffer: rest}, frame) do
+          {:ok, state} -> drain_frames(state)
+          {:lost, state} -> {:lost, state}
+        end
 
       :partial ->
-        state
+        {:ok, state}
     end
   end
 
@@ -324,7 +362,7 @@ defmodule Eipex.Scanner do
     next_request(%{state | pending: nil})
   end
 
-  defp handle_frame(state, %Encap{}), do: state
+  defp handle_frame(state, %Encap{}), do: {:ok, state}
 
   defp decode_reply(%Encap{status: 0} = frame) do
     with {:ok, cpf} <- Encap.unwrap_cpf(frame),

@@ -328,5 +328,39 @@ defmodule Eipex.ScannerTest do
       assert {:error, :connection_lost} = Task.await(caller, 1_000)
       assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :connection_lost}}, 1_000
     end
+
+    test "send failure on a subsequent request reports connection_lost, not a badmatch" do
+      Process.flag(:trap_exit, true)
+
+      handler = fn mr ->
+        {:ok, %{service: 0x0E}} = MessageRouter.decode_request(mr)
+        MessageRouter.encode_response(0x0E, 0x00, data: <<1>>)
+      end
+
+      target = ScriptedTarget.start(handler, rst_after_reply: true)
+      pid = start_scanner(target)
+      ref = Process.monitor(pid)
+
+      first =
+        Task.async(fn ->
+          Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1, timeout: 2_000)
+        end)
+
+      # the target holds its reply for a while (see rst_after_reply above),
+      # so this has ample room to land in the queue behind the first request
+      # before the reply (and reset) arrive
+      Process.sleep(10)
+
+      second =
+        Task.async(fn ->
+          Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 2, timeout: 2_000)
+        end)
+
+      assert {:ok, %{data: <<1>>}} = Task.await(first, 1_000)
+      assert {:error, :connection_lost} = Task.await(second, 1_000)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :connection_lost}}, 1_000
+      refute_received {:DOWN, ^ref, :process, ^pid, {{:badmatch, _}, _}}
+    end
   end
 end
