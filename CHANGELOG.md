@@ -48,3 +48,4 @@
 - [Added] Scanner Forward Open/Close with large-to-standard fallback
 - [Added] Scanner connected requests over SendUnitData with sequence counts
 - [Added] Adapter class 3 Forward Open/Close with connection table and capacity
+- [Added] Adapter serves connected requests with sequence dedup and reply caching

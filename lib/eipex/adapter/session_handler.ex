@@ -23,7 +23,8 @@ defmodule Eipex.Adapter.SessionHandler do
        buffer: <<>>,
        session_handle: nil,
        timer: nil,
-       closing: false
+       closing: false,
+       conn_replies: %{}
      }}
   end
 
@@ -125,6 +126,24 @@ defmodule Eipex.Adapter.SessionHandler do
     state
   end
 
+  defp handle_frame(state, %Encap{command: :send_unit_data, session_handle: handle} = frame) do
+    cond do
+      is_nil(state.session_handle) or handle != state.session_handle ->
+        reply(state, %Encap{frame | status: 0x0064, data: <<>>})
+        state
+
+      true ->
+        case unit_payload(frame) do
+          {:ok, conn_id, seq, mr} ->
+            serve_connected(state, conn_id, seq, mr)
+
+          {:error, _} ->
+            reply(state, %Encap{frame | status: 0x0003, data: <<>>})
+            state
+        end
+    end
+  end
+
   # send_unit_data (phase 4) and unknown commands: invalid command
   defp handle_frame(state, %Encap{} = frame) do
     reply(state, %Encap{frame | status: 0x0001, data: <<>>})
@@ -138,6 +157,51 @@ defmodule Eipex.Adapter.SessionHandler do
       {:ok, mr}
     else
       _ -> {:error, :malformed}
+    end
+  end
+
+  defp unit_payload(frame) do
+    with {:ok, cpf} <- Encap.unwrap_cpf(frame),
+         {:ok, items} <- CPF.decode(cpf),
+         [{:connected_address, conn_id}] <-
+           for({:connected_address, _} = i <- items, do: i),
+         [{:connected_data, <<seq::16-little, mr::binary>>}] <-
+           for({:connected_data, _} = i <- items, do: i) do
+      {:ok, conn_id, seq, mr}
+    else
+      _ -> {:error, :malformed}
+    end
+  end
+
+  defp serve_connected(state, conn_id, seq, mr) do
+    case Eipex.Adapter.ConnectionTable.lookup_o2t(state.config.connections, conn_id) do
+      {:ok, %{session: session, t2o_connection_id: t2o_id}} when session == self() ->
+        case state.conn_replies do
+          %{^conn_id => {^seq, cached}} ->
+            reply(state, cached)
+            state
+
+          _ ->
+            response = MessageRouter.dispatch(state.config, mr)
+
+            reply_frame = %Encap{
+              Encap.send_unit_data(
+                state.session_handle,
+                CPF.encode([
+                  {:connected_address, t2o_id},
+                  {:connected_data, <<seq::16-little, response::binary>>}
+                ])
+              )
+              | sender_context: <<0::64>>
+            }
+
+            reply(state, reply_frame)
+            %{state | conn_replies: Map.put(state.conn_replies, conn_id, {seq, reply_frame})}
+        end
+
+      _unknown_or_foreign ->
+        # no reply is routable for an unknown/foreign connection: drop
+        state
     end
   end
 
