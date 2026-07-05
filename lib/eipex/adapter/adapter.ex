@@ -34,6 +34,10 @@ defmodule Eipex.Adapter do
   @spec port(GenServer.server()) :: {:ok, :inet.port_number()} | {:error, :not_listening}
   def port(server), do: GenServer.call(server, :port)
 
+  @spec discovery_port(GenServer.server()) ::
+          {:ok, :inet.port_number()} | {:error, :not_running}
+  def discovery_port(server), do: GenServer.call(server, :discovery_port)
+
   @spec read_assembly(GenServer.server(), non_neg_integer()) ::
           {:ok, binary()} | {:error, term()}
   def read_assembly(server, instance), do: GenServer.call(server, {:read_assembly, instance})
@@ -70,7 +74,30 @@ defmodule Eipex.Adapter do
           config: config
         })
 
-      {:ok, %{config: config, sessions_sup: sessions_sup, listener: listener, opts: opts}}
+      discovery =
+        case Keyword.get(opts, :discovery, false) do
+          false ->
+            nil
+
+          disc_opts ->
+            {:ok, pid} =
+              Eipex.Adapter.Discovery.start_link(%{
+                port: Keyword.get(disc_opts, :port, 44_818),
+                delay: Keyword.get(disc_opts, :delay, {0, 500}),
+                config: config
+              })
+
+            pid
+        end
+
+      {:ok,
+       %{
+         config: config,
+         sessions_sup: sessions_sup,
+         listener: listener,
+         discovery: discovery,
+         opts: opts
+       }}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -79,6 +106,13 @@ defmodule Eipex.Adapter do
   @impl true
   def handle_call(:port, _from, state) do
     {:reply, Eipex.Adapter.Listener.port(state.listener), state}
+  end
+
+  def handle_call(:discovery_port, _from, state) do
+    case state.discovery do
+      nil -> {:reply, {:error, :not_running}, state}
+      pid -> {:reply, Eipex.Adapter.Discovery.port(pid), state}
+    end
   end
 
   def handle_call({:read_assembly, instance}, _from, state) do
