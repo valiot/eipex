@@ -35,3 +35,4 @@
 - [Fixed] Adapter start_link returns a clean error for incomplete identity options
 - [Added] Adapter message router dispatch, object/handler behaviours and Identity object
 - [Added] Assembly object with handler-mediated reads and writes
+- [Added] Connection Manager (Unconnected Send), TCP/IP Interface and Ethernet Link objects
