@@ -45,6 +45,23 @@ defmodule Eipex.Adapter.DiscoveryTest do
     assert {:error, :not_running} = Eipex.Adapter.discovery_port(adapter)
   end
 
+  test "identity reports the adapter's real ip and resolved tcp port" do
+    {:ok, adapter} =
+      Eipex.Adapter.start_link(
+        identity: @identity,
+        assemblies: [],
+        port: 0,
+        network: [ip: {127, 0, 0, 1}],
+        discovery: [port: 0, delay: {0, 0}]
+      )
+
+    {:ok, tcp_port} = Eipex.Adapter.port(adapter)
+    {:ok, udp_port} = Eipex.Adapter.discovery_port(adapter)
+
+    assert {:ok, [%Eipex.Identity{ip: {127, 0, 0, 1}, port: ^tcp_port}]} =
+             Eipex.Scanner.discover(address: {127, 0, 0, 1}, port: udp_port, timeout: 500)
+  end
+
   test "stray messages do not kill the responder" do
     adapter = start_adapter(port: 0, delay: {0, 0})
     {:ok, udp_port} = Eipex.Adapter.discovery_port(adapter)

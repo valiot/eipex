@@ -31,7 +31,7 @@ defmodule Eipex.Adapter do
     end
   end
 
-  @spec port(GenServer.server()) :: {:ok, :inet.port_number()} | {:error, :not_listening}
+  @spec port(GenServer.server()) :: {:ok, :inet.port_number()}
   def port(server), do: GenServer.call(server, :port)
 
   @spec discovery_port(GenServer.server()) ::
@@ -54,7 +54,19 @@ defmodule Eipex.Adapter do
 
   @impl true
   def init(opts) do
-    with {:ok, identity} <- build_identity(Keyword.get(opts, :identity)),
+    listen_opts = [
+      :binary,
+      packet: :raw,
+      active: false,
+      reuseaddr: true,
+      ip: Keyword.get(opts, :ip, {0, 0, 0, 0})
+    ]
+
+    network = Map.new(Keyword.get(opts, :network, []))
+
+    with {:ok, listen} <- :gen_tcp.listen(Keyword.get(opts, :port, 44_818), listen_opts),
+         {:ok, resolved_port} <- :inet.port(listen),
+         {:ok, identity} <- build_identity(Keyword.get(opts, :identity), network, resolved_port),
          {:ok, store} <- AssemblyStore.start_link(Keyword.get(opts, :assemblies, [])),
          {:ok, sessions_sup} <- DynamicSupervisor.start_link(strategy: :one_for_one) do
       config = %Config{
@@ -63,13 +75,12 @@ defmodule Eipex.Adapter do
         handler: Keyword.get(opts, :handler, Eipex.Adapter.Handler.Default),
         store: store,
         inactivity_timeout: Keyword.get(opts, :inactivity_timeout, 120_000),
-        network: Map.new(Keyword.get(opts, :network, []))
+        network: network
       }
 
       {:ok, listener} =
         Eipex.Adapter.Listener.start_link(%{
-          port: Keyword.get(opts, :port, 44_818),
-          ip: Keyword.get(opts, :ip, {0, 0, 0, 0}),
+          listen: listen,
           sessions_sup: sessions_sup,
           config: config
         })
@@ -96,7 +107,8 @@ defmodule Eipex.Adapter do
          sessions_sup: sessions_sup,
          listener: listener,
          discovery: discovery,
-         opts: opts
+         opts: opts,
+         port: resolved_port
        }}
     else
       {:error, reason} -> {:stop, reason}
@@ -105,7 +117,7 @@ defmodule Eipex.Adapter do
 
   @impl true
   def handle_call(:port, _from, state) do
-    {:reply, Eipex.Adapter.Listener.port(state.listener), state}
+    {:reply, {:ok, state.port}, state}
   end
 
   def handle_call(:discovery_port, _from, state) do
@@ -127,13 +139,15 @@ defmodule Eipex.Adapter do
 
   # -- Option handling -----------------------------------------------------------
 
-  defp build_identity(nil), do: {:error, :missing_identity}
+  defp build_identity(nil, _network, _port), do: {:error, :missing_identity}
 
-  defp build_identity(opts) do
+  defp build_identity(opts, network, port) do
     case Enum.find([:vendor_id, :product_code, :product_name], &(not Keyword.has_key?(opts, &1))) do
       nil ->
         {:ok,
          %Identity{
+           ip: Map.get(network, :ip, {0, 0, 0, 0}),
+           port: port,
            vendor_id: Keyword.fetch!(opts, :vendor_id),
            device_type: Keyword.get(opts, :device_type, 0x0C),
            product_code: Keyword.fetch!(opts, :product_code),

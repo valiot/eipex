@@ -43,3 +43,4 @@
 - [Added] pycomm3 interop harness for the adapter
 - [Fixed] Scanner: pipelined-byte buffering, invalid-request isolation, derived timeout ticks
 - [Fixed] Clean session teardown, acceptor backoff and route-truncation coverage
+- [Fixed] ListIdentity advertises the configured IP and resolved TCP port

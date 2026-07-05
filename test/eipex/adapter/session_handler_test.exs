@@ -116,6 +116,7 @@ defmodule Eipex.Adapter.SessionHandlerTest do
     reply = recv_frame(socket)
     {:ok, [{:identity, id}]} = CPF.decode(reply.data)
     assert id.product_name == "Eipex Adapter"
+    assert id.port == port
 
     send_frame(socket, %Encap{command: :list_services})
 
