@@ -45,3 +45,4 @@
 - [Fixed] Clean session teardown, acceptor backoff and route-truncation coverage
 - [Fixed] ListIdentity advertises the configured IP and resolved TCP port
 - [Added] Forward Close reply and Forward Open error-reply codecs
+- [Added] Scanner Forward Open/Close with large-to-standard fallback

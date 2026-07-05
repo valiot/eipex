@@ -12,7 +12,7 @@ defmodule Eipex.Scanner do
   use GenServer
 
   alias Eipex.{CPF, Encap}
-  alias Eipex.CIP.{ConnectionManager, MessageRouter}
+  alias Eipex.CIP.{ConnectionManager, MessageRouter, Path}
 
   @default_port 44_818
   @default_timeout 5_000
@@ -28,7 +28,11 @@ defmodule Eipex.Scanner do
               context_counter: 1,
               route_path: :none,
               keepalive: nil,
-              timeout: nil
+              timeout: nil,
+              vendor_id: 0xFFFF,
+              serial_number: 0,
+              connection_serial_counter: 1,
+              connection: nil
   end
 
   # -- Public API --------------------------------------------------------------
@@ -45,6 +49,14 @@ defmodule Eipex.Scanner do
   def close(server), do: GenServer.call(server, :close)
 
   defdelegate discover(opts \\ []), to: Eipex.Scanner.Discovery
+
+  @spec forward_open(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
+  def forward_open(server, opts \\ []) do
+    GenServer.call(server, {:forward_open, opts}, :infinity)
+  end
+
+  @spec forward_close(GenServer.server()) :: :ok | {:error, term()}
+  def forward_close(server), do: GenServer.call(server, :forward_close, :infinity)
 
   @type response :: %{
           service: byte(),
@@ -134,7 +146,12 @@ defmodule Eipex.Scanner do
         buffer: rest,
         route_path: opts |> Keyword.get(:route_path, :none) |> normalize_route(),
         keepalive: Keyword.get(opts, :keepalive, @default_keepalive),
-        timeout: timeout
+        timeout: timeout,
+        vendor_id: Keyword.get(opts, :vendor_id, 0xFFFF),
+        serial_number:
+          Keyword.get_lazy(opts, :serial_number, fn ->
+            Bitwise.band(:erlang.unique_integer([:positive]), 0xFFFF_FFFF)
+          end)
       }
 
       {:ok, schedule_keepalive(state)}
@@ -148,19 +165,7 @@ defmodule Eipex.Scanner do
     case build_request(opts, state) do
       {:ok, mr} ->
         timeout = Keyword.get(opts, :timeout, state.timeout)
-
-        if state.pending do
-          {:noreply, %{state | queue: :queue.in({from, mr, timeout}, state.queue)}}
-        else
-          case send_request(state, from, mr, timeout) do
-            {:ok, state} ->
-              {:noreply, state}
-
-            {:lost, state} ->
-              {:stop, {:shutdown, :connection_lost},
-               fail_callers(state, {:error, :connection_lost})}
-          end
-        end
+        dispatch_request(state, from, mr, timeout, :request)
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -168,6 +173,37 @@ defmodule Eipex.Scanner do
   rescue
     exception ->
       {:reply, {:error, {:invalid_request, Exception.message(exception)}}, state}
+  end
+
+  @impl true
+  def handle_call({:forward_open, _opts}, _from, %State{connection: conn} = state)
+      when not is_nil(conn) do
+    {:reply, {:error, :already_connected}, state}
+  end
+
+  def handle_call({:forward_open, opts}, from, state) do
+    variant = Keyword.get(opts, :variant, :large)
+    {fo, state} = build_forward_open(state, variant)
+    mr = ConnectionManager.encode_forward_open(fo, variant)
+    meta = %{fo: fo, variant: variant, fallback: variant == :large}
+    dispatch_request(state, from, mr, state.timeout, {:forward_open, meta})
+  end
+
+  def handle_call(:forward_close, _from, %State{connection: nil} = state) do
+    {:reply, {:error, :no_connection}, state}
+  end
+
+  def handle_call(:forward_close, from, state) do
+    conn = state.connection
+
+    triad = %{
+      connection_serial: conn.connection_serial,
+      originator_vendor_id: state.vendor_id,
+      originator_serial: state.serial_number
+    }
+
+    mr = ConnectionManager.encode_forward_close(triad, conn.connection_path, [])
+    dispatch_request(state, from, mr, state.timeout, :forward_close)
   end
 
   @impl true
@@ -192,7 +228,7 @@ defmodule Eipex.Scanner do
 
   def handle_info({:request_timeout, context}, state) do
     case state.pending do
-      {from, ^context, _timer} ->
+      {from, ^context, _timer, _kind} ->
         GenServer.reply(from, {:error, :timeout})
 
         case next_request(%{state | pending: nil}) do
@@ -315,7 +351,21 @@ defmodule Eipex.Scanner do
     end
   end
 
-  defp send_request(state, from, mr, timeout) do
+  defp dispatch_request(state, from, mr, timeout, kind) do
+    if state.pending do
+      {:noreply, %{state | queue: :queue.in({from, mr, timeout, kind}, state.queue)}}
+    else
+      case send_request(state, from, mr, timeout, kind) do
+        {:ok, state} ->
+          {:noreply, state}
+
+        {:lost, state} ->
+          {:stop, {:shutdown, :connection_lost}, fail_callers(state, {:error, :connection_lost})}
+      end
+    end
+  end
+
+  defp send_request(state, from, mr, timeout, kind) do
     context = <<state.context_counter::64-little>>
     cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
 
@@ -329,7 +379,11 @@ defmodule Eipex.Scanner do
         timer = Process.send_after(self(), {:request_timeout, context}, timeout)
 
         {:ok,
-         %{state | pending: {from, context, timer}, context_counter: state.context_counter + 1}}
+         %{
+           state
+           | pending: {from, context, timer, kind},
+             context_counter: state.context_counter + 1
+         }}
 
       {:error, _reason} ->
         GenServer.reply(from, {:error, :connection_lost})
@@ -339,8 +393,8 @@ defmodule Eipex.Scanner do
 
   defp next_request(%State{pending: nil} = state) do
     case :queue.out(state.queue) do
-      {{:value, {from, mr, timeout}}, queue} ->
-        send_request(%{state | queue: queue}, from, mr, timeout)
+      {{:value, {from, mr, timeout, kind}}, queue} ->
+        send_request(%{state | queue: queue}, from, mr, timeout, kind)
 
       {:empty, _} ->
         {:ok, state}
@@ -363,15 +417,77 @@ defmodule Eipex.Scanner do
   end
 
   defp handle_frame(
-         %State{pending: {from, context, timer}} = state,
+         %State{pending: {from, context, timer, kind}} = state,
          %Encap{command: :send_rr_data, sender_context: context} = frame
        ) do
     Process.cancel_timer(timer)
-    GenServer.reply(from, decode_reply(frame))
-    next_request(%{state | pending: nil})
+    settle_reply(kind, decode_reply(frame), from, %{state | pending: nil})
   end
 
   defp handle_frame(state, %Encap{}), do: {:ok, state}
+
+  defp settle_reply(:request, reply, from, state) do
+    GenServer.reply(from, reply)
+    next_request(state)
+  end
+
+  defp settle_reply({:forward_open, meta}, reply, from, state) do
+    case reply do
+      {:ok, %{status_name: :success, data: data}} ->
+        case ConnectionManager.decode_forward_open_reply(data) do
+          {:ok, fo_reply} ->
+            conn = %{
+              o2t_connection_id: fo_reply.o2t_connection_id,
+              t2o_connection_id: fo_reply.t2o_connection_id,
+              connection_serial: meta.fo.connection_serial,
+              connection_path: meta.fo.connection_path,
+              size: meta.fo.o2t_params.size,
+              variant: meta.variant,
+              seq: 1
+            }
+
+            GenServer.reply(from, {:ok, Map.drop(conn, [:seq, :connection_path])})
+            next_request(%{state | connection: conn})
+
+          {:error, reason} ->
+            GenServer.reply(from, {:error, reason})
+            next_request(state)
+        end
+
+      {:ok, %{status_name: _name, extended: _extended}} when meta.fallback ->
+        {fo, state} = build_forward_open(state, :standard)
+        mr = ConnectionManager.encode_forward_open(fo, :standard)
+        meta = %{fo: fo, variant: :standard, fallback: false}
+
+        # send_request returns {:ok, state} | {:lost, state} — propagate the tag
+        # verbatim (on :lost it already replied {:error, :connection_lost} to from)
+        send_request(state, from, mr, state.timeout, {:forward_open, meta})
+
+      {:ok, %{status_name: name, extended: extended}} ->
+        GenServer.reply(from, {:error, {:cip, name, extended}})
+        next_request(state)
+
+      {:error, _} = error ->
+        GenServer.reply(from, error)
+        next_request(state)
+    end
+  end
+
+  defp settle_reply(:forward_close, reply, from, state) do
+    case reply do
+      {:ok, %{status_name: :success}} ->
+        GenServer.reply(from, :ok)
+        next_request(%{state | connection: nil})
+
+      {:ok, %{status_name: name, extended: extended}} ->
+        GenServer.reply(from, {:error, {:cip, name, extended}})
+        next_request(state)
+
+      {:error, _} = error ->
+        GenServer.reply(from, error)
+        next_request(state)
+    end
+  end
 
   defp decode_reply(%Encap{status: 0} = frame) do
     with {:ok, cpf} <- Encap.unwrap_cpf(frame),
@@ -389,6 +505,55 @@ defmodule Eipex.Scanner do
     {:error, {:encap, Encap.status_name(status)}}
   end
 
+  # -- Connected messaging: Forward Open / Forward Close -------------------------
+
+  defp build_forward_open(state, variant) do
+    serial = state.connection_serial_counter
+
+    route =
+      case state.route_path do
+        :none -> []
+        segments -> segments
+      end
+
+    fo = %ConnectionManager.ForwardOpen{
+      priority_time_tick: 0x0A,
+      timeout_ticks: 10,
+      o2t_connection_id: 0,
+      t2o_connection_id: Bitwise.band(:erlang.unique_integer([:positive]), 0xFFFF_FFFF),
+      connection_serial: serial,
+      originator_vendor_id: state.vendor_id,
+      originator_serial: state.serial_number,
+      timeout_multiplier: 1,
+      o2t_rpi: 10_000_000,
+      o2t_params: connection_params(variant),
+      t2o_rpi: 10_000_000,
+      t2o_params: connection_params(variant),
+      transport: %{direction: :server, trigger: :application, class: 3},
+      connection_path: Path.encode(route ++ [class: 0x02, instance: 0x01])
+    }
+
+    {fo, %{state | connection_serial_counter: serial + 1}}
+  end
+
+  defp connection_params(:large),
+    do: %{
+      owner: :exclusive,
+      type: :point_to_point,
+      priority: :low,
+      size_type: :variable,
+      size: 4002
+    }
+
+  defp connection_params(:standard),
+    do: %{
+      owner: :exclusive,
+      type: :point_to_point,
+      priority: :low,
+      size_type: :variable,
+      size: 500
+    }
+
   # -- Keepalive and loss handling ------------------------------------------------
 
   defp schedule_keepalive(%State{keepalive: :none} = state), do: state
@@ -400,7 +565,7 @@ defmodule Eipex.Scanner do
 
   defp fail_callers(state, reply) do
     case state.pending do
-      {from, _context, timer} ->
+      {from, _context, timer, _kind} ->
         Process.cancel_timer(timer)
         GenServer.reply(from, reply)
 
@@ -408,7 +573,7 @@ defmodule Eipex.Scanner do
         :ok
     end
 
-    for {from, _mr, _timeout} <- :queue.to_list(state.queue) do
+    for {from, _mr, _timeout, _kind} <- :queue.to_list(state.queue) do
       GenServer.reply(from, reply)
     end
 
