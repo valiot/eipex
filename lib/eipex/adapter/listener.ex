@@ -46,7 +46,9 @@ defmodule Eipex.Adapter.Listener do
       {:error, :closed} ->
         :ok
 
-      {:error, _} ->
+      {:error, _reason} ->
+        # avoid hot-spinning on emfile/enfile during fd exhaustion
+        Process.sleep(100)
         accept_loop(listen, sessions_sup, config)
     end
   end

@@ -42,3 +42,4 @@
 - [Fixed] Discovery responder survives stray and udp_error messages
 - [Added] pycomm3 interop harness for the adapter
 - [Fixed] Scanner: pipelined-byte buffering, invalid-request isolation, derived timeout ticks
+- [Fixed] Clean session teardown, acceptor backoff and route-truncation coverage

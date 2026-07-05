@@ -196,4 +196,10 @@ defmodule Eipex.CIP.ConnectionManagerTest do
 
     assert {:error, :malformed_unconnected_send} = CM.decode_unconnected_send(<<1>>)
   end
+
+  test "decode_unconnected_send rejects truncated route after a complete embedded message" do
+    # embedded parses (2 bytes, even), but route_words claims 2 words with only 1 byte present
+    data = <<0x0A, 5, 2::16-little, 0xAA, 0xBB, 2, 0, 0x01>>
+    assert {:error, :malformed_unconnected_send} = CM.decode_unconnected_send(data)
+  end
 end

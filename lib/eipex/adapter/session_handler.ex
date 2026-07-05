@@ -36,8 +36,16 @@ defmodule Eipex.Adapter.SessionHandler do
   @impl true
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     state = drain(%{state | buffer: state.buffer <> data})
-    :ok = :inet.setopts(socket, active: :once)
-    {:noreply, arm_inactivity(state)}
+
+    if state.closing do
+      {:stop, :normal, state}
+    else
+      case :inet.setopts(socket, active: :once) do
+        :ok -> {:noreply, arm_inactivity(state)}
+        # the peer may have RST'd the connection between the read and here
+        {:error, _} -> {:stop, :normal, state}
+      end
+    end
   end
 
   def handle_info({:tcp_closed, socket}, %{socket: socket} = state), do: {:stop, :normal, state}
@@ -47,8 +55,6 @@ defmodule Eipex.Adapter.SessionHandler do
     :gen_tcp.close(state.socket)
     {:stop, {:shutdown, :inactivity_timeout}, state}
   end
-
-  def handle_info(:stop_normal, state), do: {:stop, :normal, state}
 
   # -- Frame handling ------------------------------------------------------------
 
@@ -74,8 +80,8 @@ defmodule Eipex.Adapter.SessionHandler do
 
   defp handle_frame(state, %Encap{command: :unregister_session}) do
     :gen_tcp.close(state.socket)
-    # finish draining this packet, then stop; no reply is defined for unregister
-    send(self(), :stop_normal)
+    # no reply is defined for unregister; `closing: true` drives the stop
+    # once the current packet finishes draining, back in handle_info/2
     %{state | closing: true}
   end
 

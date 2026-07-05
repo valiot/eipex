@@ -47,6 +47,12 @@ defmodule Eipex.Adapter.SessionHandlerTest do
     handle
   end
 
+  defp session_handler_pid(adapter_pid) do
+    sessions_sup = :sys.get_state(adapter_pid).sessions_sup
+    [{_, session_pid, _, _}] = DynamicSupervisor.which_children(sessions_sup)
+    session_pid
+  end
+
   test "registers a session and answers identity over UCMM" do
     {_pid, port} = start_adapter()
     socket = connect(port)
@@ -139,6 +145,19 @@ defmodule Eipex.Adapter.SessionHandlerTest do
     socket2 = connect(port)
     assert register(socket2) != 0
     assert Process.alive?(pid)
+  end
+
+  test "clean unregister does not crash the session handler" do
+    {pid, port} = start_adapter()
+    socket = connect(port)
+    handle = register(socket)
+
+    session_pid = session_handler_pid(pid)
+    ref = Process.monitor(session_pid)
+
+    send_frame(socket, Encap.unregister_session(handle))
+
+    assert_receive {:DOWN, ^ref, :process, ^session_pid, :normal}, 1_000
   end
 
   test "frames pipelined after unregister are not dispatched" do
