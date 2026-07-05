@@ -31,3 +31,4 @@
 - [Fixed] Scanner send failures stop the session with connection_lost instead of crashing
 - [Fixed] Hermetic discovery leak test without DNS; test timing hardening
 - [Added] Unconnected Send decode and unknown-command encapsulation replies
+- [Added] Adapter skeleton: config, assembly store and owner process
