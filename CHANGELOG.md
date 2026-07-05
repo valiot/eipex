@@ -33,3 +33,4 @@
 - [Added] Unconnected Send decode and unknown-command encapsulation replies
 - [Added] Adapter skeleton: config, assembly store and owner process
 - [Fixed] Adapter start_link returns a clean error for incomplete identity options
+- [Added] Adapter message router dispatch, object/handler behaviours and Identity object
