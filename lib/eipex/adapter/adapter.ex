@@ -62,8 +62,15 @@ defmodule Eipex.Adapter do
         network: Map.new(Keyword.get(opts, :network, []))
       }
 
-      # Listener (Task 6) and Discovery (Task 7) start here once they exist.
-      {:ok, %{config: config, sessions_sup: sessions_sup, listener: nil, opts: opts}}
+      {:ok, listener} =
+        Eipex.Adapter.Listener.start_link(%{
+          port: Keyword.get(opts, :port, 44_818),
+          ip: Keyword.get(opts, :ip, {0, 0, 0, 0}),
+          sessions_sup: sessions_sup,
+          config: config
+        })
+
+      {:ok, %{config: config, sessions_sup: sessions_sup, listener: listener, opts: opts}}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -71,9 +78,7 @@ defmodule Eipex.Adapter do
 
   @impl true
   def handle_call(:port, _from, state) do
-    # Task 6 replaces this clause with a Listener.port/1 lookup once the
-    # listener exists; referencing the module now would warn at compile time.
-    {:reply, {:error, :not_listening}, state}
+    {:reply, Eipex.Adapter.Listener.port(state.listener), state}
   end
 
   def handle_call({:read_assembly, instance}, _from, state) do
