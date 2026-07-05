@@ -202,4 +202,46 @@ defmodule Eipex.CIP.ConnectionManagerTest do
     data = <<0x0A, 5, 2::16-little, 0xAA, 0xBB, 2, 0, 0x01>>
     assert {:error, :malformed_unconnected_send} = CM.decode_unconnected_send(data)
   end
+
+  test "forward close reply round-trips" do
+    triad = %{
+      connection_serial: 0xBEEF,
+      originator_vendor_id: 0x004D,
+      originator_serial: 0xDEAD_0001
+    }
+
+    reply = CM.encode_forward_close_reply(triad)
+
+    assert reply ==
+             <<0xBEEF::16-little, 0x004D::16-little, 0xDEAD_0001::32-little, 0, 0>>
+
+    assert {:ok,
+            %{
+              connection_serial: 0xBEEF,
+              originator_vendor_id: 0x004D,
+              originator_serial: 0xDEAD_0001
+            }} = CM.decode_forward_close_reply(reply)
+
+    assert {:error, :malformed_reply} = CM.decode_forward_close_reply(<<1, 2, 3>>)
+  end
+
+  test "forward open error reply decodes the triad" do
+    body = <<0xBEEF::16-little, 0x004D::16-little, 0xDEAD_0001::32-little, 1, 0>>
+
+    assert {:ok,
+            %{
+              connection_serial: 0xBEEF,
+              originator_vendor_id: 0x004D,
+              originator_serial: 0xDEAD_0001,
+              remaining_path_size: 1
+            }} =
+             CM.decode_forward_open_error(body)
+
+    assert {:error, :malformed_reply} = CM.decode_forward_open_error(<<1, 2>>)
+  end
+
+  test "new extended status names" do
+    assert CM.ext_status_name(0x0103) == :transport_trigger_not_supported
+    assert CM.ext_status_name(0x0107) == :target_connection_not_found
+  end
 end

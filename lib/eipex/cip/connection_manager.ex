@@ -45,7 +45,9 @@ defmodule Eipex.CIP.ConnectionManager do
 
   @ext_statuses %{
     0x0100 => :connection_in_use,
+    0x0103 => :transport_trigger_not_supported,
     0x0106 => :ownership_conflict,
+    0x0107 => :target_connection_not_found,
     0x0110 => :target_not_configured,
     0x0111 => :rpi_not_supported,
     0x0113 => :out_of_connections,
@@ -244,6 +246,39 @@ defmodule Eipex.CIP.ConnectionManager do
   end
 
   def decode_forward_close(_), do: {:error, :malformed_forward_close}
+
+  @spec encode_forward_close_reply(map()) :: binary()
+  def encode_forward_close_reply(triad) do
+    <<triad.connection_serial::16-little, triad.originator_vendor_id::16-little,
+      triad.originator_serial::32-little, 0, 0>>
+  end
+
+  @spec decode_forward_close_reply(binary()) :: {:ok, map()} | {:error, :malformed_reply}
+  def decode_forward_close_reply(
+        <<serial::16-little, vendor::16-little, orig_serial::32-little, _app_words, _reserved,
+          _app_reply::binary>>
+      ) do
+    {:ok,
+     %{connection_serial: serial, originator_vendor_id: vendor, originator_serial: orig_serial}}
+  end
+
+  def decode_forward_close_reply(_), do: {:error, :malformed_reply}
+
+  @spec decode_forward_open_error(binary()) :: {:ok, map()} | {:error, :malformed_reply}
+  def decode_forward_open_error(
+        <<serial::16-little, vendor::16-little, orig_serial::32-little, remaining_path_size,
+          _reserved, _rest::binary>>
+      ) do
+    {:ok,
+     %{
+       connection_serial: serial,
+       originator_vendor_id: vendor,
+       originator_serial: orig_serial,
+       remaining_path_size: remaining_path_size
+     }}
+  end
+
+  def decode_forward_open_error(_), do: {:error, :malformed_reply}
 
   # -- Unconnected Send --------------------------------------------------------
 
