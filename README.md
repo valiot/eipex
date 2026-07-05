@@ -11,3 +11,7 @@ services. Design: `docs/superpowers/specs/2026-07-02-ethernet-ip-stack-design.md
     docker compose -f interop/docker-compose.yml up -d
     mix test --include interop
     docker compose -f interop/docker-compose.yml down
+
+The adapter side is exercised with pycomm3:
+
+    mix test --include interop test/interop/pycomm3_test.exs

@@ -40,3 +40,4 @@
 - [Fixed] Session handler discards frames pipelined after UnregisterSession
 - [Added] UDP ListIdentity discovery responder with anti-storm delay
 - [Fixed] Discovery responder survives stray and udp_error messages
+- [Added] pycomm3 interop harness for the adapter
