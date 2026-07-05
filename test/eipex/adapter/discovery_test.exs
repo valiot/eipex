@@ -44,4 +44,17 @@ defmodule Eipex.Adapter.DiscoveryTest do
     adapter = start_adapter(false)
     assert {:error, :not_running} = Eipex.Adapter.discovery_port(adapter)
   end
+
+  test "stray messages do not kill the responder" do
+    adapter = start_adapter(port: 0, delay: {0, 0})
+    {:ok, udp_port} = Eipex.Adapter.discovery_port(adapter)
+
+    # reach into the tree: send a udp_error-shaped message directly
+    state = :sys.get_state(adapter)
+    send(state.discovery, {:udp_error, :some_socket, :econnreset})
+
+    # responder still answers afterwards
+    assert {:ok, [%Eipex.Identity{}]} =
+             Eipex.Scanner.discover(address: {127, 0, 0, 1}, port: udp_port, timeout: 500)
+  end
 end

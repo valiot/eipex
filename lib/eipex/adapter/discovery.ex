@@ -44,6 +44,8 @@ defmodule Eipex.Adapter.Discovery do
     {:noreply, state}
   end
 
+  def handle_info(_message, state), do: {:noreply, state}
+
   defp random_delay({min, max}) when max > min, do: min + :rand.uniform(max - min + 1) - 1
   defp random_delay({min, _}), do: min
 end

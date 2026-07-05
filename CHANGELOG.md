@@ -39,3 +39,4 @@
 - [Added] Adapter TCP listener and session handler; loopback tests against our scanner
 - [Fixed] Session handler discards frames pipelined after UnregisterSession
 - [Added] UDP ListIdentity discovery responder with anti-storm delay
+- [Fixed] Discovery responder survives stray and udp_error messages
