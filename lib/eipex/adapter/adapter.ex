@@ -91,15 +91,21 @@ defmodule Eipex.Adapter do
   defp build_identity(nil), do: {:error, :missing_identity}
 
   defp build_identity(opts) do
-    {:ok,
-     %Identity{
-       vendor_id: Keyword.fetch!(opts, :vendor_id),
-       device_type: Keyword.get(opts, :device_type, 0x0C),
-       product_code: Keyword.fetch!(opts, :product_code),
-       revision: Keyword.get(opts, :revision, {1, 0}),
-       serial_number: Keyword.get(opts, :serial_number, 0),
-       product_name: Keyword.fetch!(opts, :product_name),
-       state: 3
-     }}
+    case Enum.find([:vendor_id, :product_code, :product_name], &(not Keyword.has_key?(opts, &1))) do
+      nil ->
+        {:ok,
+         %Identity{
+           vendor_id: Keyword.fetch!(opts, :vendor_id),
+           device_type: Keyword.get(opts, :device_type, 0x0C),
+           product_code: Keyword.fetch!(opts, :product_code),
+           revision: Keyword.get(opts, :revision, {1, 0}),
+           serial_number: Keyword.get(opts, :serial_number, 0),
+           product_name: Keyword.fetch!(opts, :product_name),
+           state: 3
+         }}
+
+      missing ->
+        {:error, {:missing_identity_option, missing}}
+    end
   end
 end

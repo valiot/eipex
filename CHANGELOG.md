@@ -32,3 +32,4 @@
 - [Fixed] Hermetic discovery leak test without DNS; test timing hardening
 - [Added] Unconnected Send decode and unknown-command encapsulation replies
 - [Added] Adapter skeleton: config, assembly store and owner process
+- [Fixed] Adapter start_link returns a clean error for incomplete identity options

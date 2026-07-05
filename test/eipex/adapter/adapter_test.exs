@@ -51,5 +51,12 @@ defmodule Eipex.AdapterTest do
 
     Process.flag(:trap_exit, true)
     assert {:error, _} = Eipex.Adapter.start_link(assemblies: [], port: 0)
+
+    assert {:error, {:missing_identity_option, :product_name}} =
+             Eipex.Adapter.start_link(
+               identity: [vendor_id: 1, product_code: 2],
+               assemblies: [],
+               port: 0
+             )
   end
 end
