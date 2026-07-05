@@ -140,4 +140,30 @@ defmodule Eipex.Adapter.SessionHandlerTest do
     assert register(socket2) != 0
     assert Process.alive?(pid)
   end
+
+  test "frames pipelined after unregister are not dispatched" do
+    {pid, port} = start_adapter()
+    socket = connect(port)
+    handle = register(socket)
+
+    # one TCP write: unregister + an assembly write request
+    mr =
+      Eipex.CIP.MessageRouter.encode_request(
+        0x10,
+        [class: 0x04, instance: 150, attribute: 3],
+        <<9, 9, 9, 9>>
+      )
+
+    cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
+
+    packet =
+      Encap.encode(Encap.unregister_session(handle)) <>
+        Encap.encode(Encap.send_rr_data(handle, cpf))
+
+    :ok = :gen_tcp.send(socket, packet)
+    Process.sleep(100)
+
+    # the write must NOT have landed
+    assert {:ok, <<0, 0, 0, 0>>} = Eipex.Adapter.read_assembly(pid, 150)
+  end
 end

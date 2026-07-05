@@ -16,7 +16,15 @@ defmodule Eipex.Adapter.SessionHandler do
 
   @impl true
   def init({socket, config}) do
-    {:ok, %{socket: socket, config: config, buffer: <<>>, session_handle: nil, timer: nil}}
+    {:ok,
+     %{
+       socket: socket,
+       config: config,
+       buffer: <<>>,
+       session_handle: nil,
+       timer: nil,
+       closing: false
+     }}
   end
 
   @impl true
@@ -44,6 +52,8 @@ defmodule Eipex.Adapter.SessionHandler do
 
   # -- Frame handling ------------------------------------------------------------
 
+  defp drain(%{closing: true} = state), do: state
+
   defp drain(state) do
     case Encap.decode(state.buffer) do
       {:ok, frame, rest} -> %{state | buffer: rest} |> handle_frame(frame) |> drain()
@@ -66,7 +76,7 @@ defmodule Eipex.Adapter.SessionHandler do
     :gen_tcp.close(state.socket)
     # finish draining this packet, then stop; no reply is defined for unregister
     send(self(), :stop_normal)
-    state
+    %{state | closing: true}
   end
 
   defp handle_frame(state, %Encap{command: :send_rr_data, session_handle: handle} = frame) do

@@ -28,7 +28,6 @@
 - [Fixed] Discovery closes the UDP socket when the initial send fails
 - [Added] cpppo interop harness (docker compose + tagged interop tests)
 - [Added] CI workflow (format check + tests) on X64 runner
-- [Added] Adapter TCP listener and session handler; loopback tests against our scanner
 - [Fixed] Scanner send failures stop the session with connection_lost instead of crashing
 - [Fixed] Hermetic discovery leak test without DNS; test timing hardening
 - [Added] Unconnected Send decode and unknown-command encapsulation replies
@@ -37,3 +36,5 @@
 - [Added] Adapter message router dispatch, object/handler behaviours and Identity object
 - [Added] Assembly object with handler-mediated reads and writes
 - [Added] Connection Manager (Unconnected Send), TCP/IP Interface and Ethernet Link objects
+- [Added] Adapter TCP listener and session handler; loopback tests against our scanner
+- [Fixed] Session handler discards frames pipelined after UnregisterSession
