@@ -136,4 +136,102 @@ defmodule Eipex.ScannerConnectedTest do
 
     Scanner.close(pid)
   end
+
+  test "connected requests ride SendUnitData with incrementing sequence counts" do
+    test_pid = self()
+    {:ok, t2o_holder} = Agent.start_link(fn -> nil end)
+
+    fo_handler = fn mr ->
+      {:ok, %{service: service, data: data}} = MessageRouter.decode_request(mr)
+      {:ok, fo} = CM.decode_forward_open(service, data)
+      Agent.update(t2o_holder, fn _ -> fo.t2o_connection_id end)
+
+      reply = %CM.ForwardOpenReply{
+        o2t_connection_id: 0x0102_0304,
+        t2o_connection_id: fo.t2o_connection_id,
+        connection_serial: fo.connection_serial,
+        originator_vendor_id: fo.originator_vendor_id,
+        originator_serial: fo.originator_serial,
+        o2t_api: fo.o2t_rpi,
+        t2o_api: fo.t2o_rpi,
+        application_reply: <<>>
+      }
+
+      MessageRouter.encode_response(service, 0x00, data: CM.encode_forward_open_reply(reply))
+    end
+
+    unit_handler = fn conn_id, seq, mr ->
+      send(test_pid, {:unit, conn_id, seq})
+      {:ok, %{service: 0x0E}} = MessageRouter.decode_request(mr)
+
+      {Agent.get(t2o_holder, & &1),
+       MessageRouter.encode_response(0x0E, 0x00, data: <<seq::16-little>>)}
+    end
+
+    target = ScriptedTarget.start(fo_handler, unit_handler: unit_handler)
+    pid = start_scanner(target)
+    {:ok, _conn} = Scanner.forward_open(pid)
+
+    assert {:ok, %{status_name: :success, data: <<1::16-little>>}} =
+             Scanner.generic_message(pid,
+               service: 0x0E,
+               class: 1,
+               instance: 1,
+               attribute: 1,
+               connected: true
+             )
+
+    assert_receive {:unit, 0x0102_0304, 1}
+
+    assert {:ok, %{data: <<2::16-little>>}} =
+             Scanner.generic_message(pid,
+               service: 0x0E,
+               class: 1,
+               instance: 1,
+               attribute: 1,
+               connected: true
+             )
+
+    assert_receive {:unit, 0x0102_0304, 2}
+    Scanner.close(pid)
+  end
+
+  test "connected request without a connection errors cleanly" do
+    target = ScriptedTarget.start(fo_success_handler())
+    pid = start_scanner(target)
+
+    assert {:error, :no_connection} =
+             Scanner.generic_message(pid,
+               service: 0x0E,
+               class: 1,
+               instance: 1,
+               attribute: 1,
+               connected: true
+             )
+
+    Scanner.close(pid)
+  end
+
+  test "mismatched connection ids in replies are ignored until timeout" do
+    unit_handler = fn _conn_id, _seq, mr ->
+      {:ok, %{service: service}} = MessageRouter.decode_request(mr)
+      {0xDEAD_BEEF, MessageRouter.encode_response(service, 0x00)}
+    end
+
+    target = ScriptedTarget.start(fo_success_handler(), unit_handler: unit_handler)
+    pid = start_scanner(target)
+    {:ok, _conn} = Scanner.forward_open(pid)
+
+    assert {:error, :timeout} =
+             Scanner.generic_message(pid,
+               service: 0x0E,
+               class: 1,
+               instance: 1,
+               attribute: 1,
+               connected: true,
+               timeout: 150
+             )
+
+    Scanner.close(pid)
+  end
 end

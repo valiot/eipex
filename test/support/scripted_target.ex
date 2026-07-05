@@ -96,6 +96,40 @@ defmodule Eipex.TestSupport.ScriptedTarget do
     end
   end
 
+  defp handle_frame(socket, %Encap{command: :send_unit_data} = frame, _handler, agent, opts) do
+    case opts[:unit_handler] do
+      nil ->
+        :ok
+
+      unit_handler ->
+        {:ok, cpf} = Encap.unwrap_cpf(frame)
+        {:ok, items} = CPF.decode(cpf)
+        [{:connected_address, conn_id}] = for {:connected_address, _} = i <- items, do: i
+
+        [{:connected_data, <<seq::16-little, mr::binary>>}] =
+          for {:connected_data, _} = i <- items, do: i
+
+        case unit_handler.(conn_id, seq, mr) do
+          :no_reply ->
+            :ok
+
+          {reply_conn_id, response} ->
+            reply_cpf =
+              CPF.encode([
+                {:connected_address, reply_conn_id},
+                {:connected_data, <<seq::16-little, response::binary>>}
+              ])
+
+            reply = %Encap{
+              Encap.send_unit_data(@session_handle, reply_cpf)
+              | sender_context: frame.sender_context
+            }
+
+            send_reply(socket, Encap.encode(reply), opts, agent)
+        end
+    end
+  end
+
   defp handle_frame(_socket, %Encap{command: :unregister_session}, _handler, _agent, _opts),
     do: :ok
 

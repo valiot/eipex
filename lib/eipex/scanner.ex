@@ -162,13 +162,17 @@ defmodule Eipex.Scanner do
 
   @impl true
   def handle_call({:request, opts}, from, state) do
-    case build_request(opts, state) do
-      {:ok, mr} ->
-        timeout = Keyword.get(opts, :timeout, state.timeout)
-        dispatch_request(state, from, mr, timeout, :request)
+    if Keyword.get(opts, :connected, false) do
+      connected_request(opts, from, state)
+    else
+      case build_request(opts, state) do
+        {:ok, mr} ->
+          timeout = Keyword.get(opts, :timeout, state.timeout)
+          dispatch_request(state, from, mr, timeout, :request)
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
     end
   rescue
     exception ->
@@ -323,6 +327,22 @@ defmodule Eipex.Scanner do
     end
   end
 
+  defp connected_request(_opts, _from, %State{connection: nil} = state) do
+    {:reply, {:error, :no_connection}, state}
+  end
+
+  defp connected_request(opts, from, state) do
+    with {:ok, service} <- Keyword.fetch(opts, :service),
+         {:ok, path} <- request_path(opts) do
+      mr = MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))
+      timeout = Keyword.get(opts, :timeout, state.timeout)
+      dispatch_request(state, from, {:unit, mr}, timeout, :connected)
+    else
+      :error -> {:reply, {:error, :missing_service}, state}
+      {:error, _} = error -> {:reply, error, state}
+    end
+  end
+
   defp request_route(opts, state) do
     case Keyword.fetch(opts, :route_path) do
       {:ok, route} -> normalize_route(route)
@@ -365,7 +385,42 @@ defmodule Eipex.Scanner do
     end
   end
 
-  defp send_request(state, from, mr, timeout, kind) do
+  defp send_request(%State{connection: nil} = state, from, {:unit, _mr}, _timeout, :connected) do
+    GenServer.reply(from, {:error, :no_connection})
+    next_request(state)
+  end
+
+  defp send_request(state, from, {:unit, mr}, timeout, :connected) do
+    conn = state.connection
+    seq = conn.seq
+
+    cpf =
+      CPF.encode([
+        {:connected_address, conn.o2t_connection_id},
+        {:connected_data, <<seq::16-little, mr::binary>>}
+      ])
+
+    frame = Encap.send_unit_data(state.session_handle, cpf)
+
+    case :gen_tcp.send(state.socket, Encap.encode(frame)) do
+      :ok ->
+        timer = Process.send_after(self(), {:request_timeout, {:unit, seq}}, timeout)
+        next_seq = if seq >= 0xFFFF, do: 1, else: seq + 1
+
+        {:ok,
+         %{
+           state
+           | pending: {from, {:unit, seq}, timer, {:connected, conn.t2o_connection_id, seq}},
+             connection: %{conn | seq: next_seq}
+         }}
+
+      {:error, _} ->
+        GenServer.reply(from, {:error, :connection_lost})
+        {:lost, state}
+    end
+  end
+
+  defp send_request(state, from, mr, timeout, kind) when is_binary(mr) do
     context = <<state.context_counter::64-little>>
     cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
 
@@ -422,6 +477,25 @@ defmodule Eipex.Scanner do
        ) do
     Process.cancel_timer(timer)
     settle_reply(kind, decode_reply(frame), from, %{state | pending: nil})
+  end
+
+  defp handle_frame(
+         %State{pending: {from, _ref, timer, {:connected, t2o_id, seq}}} = state,
+         %Encap{command: :send_unit_data, status: 0} = frame
+       ) do
+    with {:ok, cpf} <- Encap.unwrap_cpf(frame),
+         {:ok, items} <- CPF.decode(cpf),
+         [{:connected_address, ^t2o_id}] <-
+           for({:connected_address, _} = i <- items, do: i),
+         [{:connected_data, <<^seq::16-little, mr::binary>>}] <-
+           for({:connected_data, _} = i <- items, do: i),
+         {:ok, response} <- MessageRouter.decode_response(mr) do
+      Process.cancel_timer(timer)
+      GenServer.reply(from, {:ok, response})
+      next_request(%{state | pending: nil})
+    else
+      _mismatch -> {:ok, state}
+    end
   end
 
   defp handle_frame(state, %Encap{}), do: {:ok, state}
