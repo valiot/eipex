@@ -55,10 +55,12 @@ defmodule Eipex.Adapter.Object.NetworkObjectsTest do
              roundtrip(config(), 0x52, [class: 0x06, instance: 1], <<1, 2, 3>>)
   end
 
-  test "forward open family answers service_not_supported until phase 4" do
+  test "forward open family with malformed payloads answers not_enough_data" do
+    cfg = config()
+
     for service <- [0x54, 0x5B, 0x4E] do
-      assert %{status_name: :service_not_supported} =
-               roundtrip(config(), service, [class: 0x06, instance: 1], <<0>>)
+      assert %{status_name: :not_enough_data} =
+               roundtrip(cfg, service, [class: 0x06, instance: 1], <<0>>)
     end
   end
 

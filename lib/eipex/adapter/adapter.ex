@@ -68,6 +68,8 @@ defmodule Eipex.Adapter do
          {:ok, resolved_port} <- :inet.port(listen),
          {:ok, identity} <- build_identity(Keyword.get(opts, :identity), network, resolved_port),
          {:ok, store} <- AssemblyStore.start_link(Keyword.get(opts, :assemblies, [])),
+         {:ok, connections} <-
+           Eipex.Adapter.ConnectionTable.start_link(max: Keyword.get(opts, :max_connections, 8)),
          {:ok, sessions_sup} <- DynamicSupervisor.start_link(strategy: :one_for_one) do
       config = %Config{
         identity: identity,
@@ -75,7 +77,8 @@ defmodule Eipex.Adapter do
         handler: Keyword.get(opts, :handler, Eipex.Adapter.Handler.Default),
         store: store,
         inactivity_timeout: Keyword.get(opts, :inactivity_timeout, 120_000),
-        network: network
+        network: network,
+        connections: connections
       }
 
       {:ok, listener} =

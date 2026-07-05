@@ -39,7 +39,13 @@ defmodule Eipex.Adapter.MessageRouter do
   defp invoke(config, class, service, instance, path_rest, data) do
     case Map.fetch(config.objects, class) do
       {:ok, module} ->
-        ctx = %{config: config, store: config.store, handler: config.handler}
+        ctx = %{
+          config: config,
+          store: config.store,
+          handler: config.handler,
+          session: self(),
+          connections: config.connections
+        }
 
         try do
           case module.handle_service(service, instance, path_rest, data, ctx) do

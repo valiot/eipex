@@ -10,7 +10,8 @@ defmodule Eipex.Adapter.Config do
             handler: nil,
             store: nil,
             inactivity_timeout: 120_000,
-            network: %{}
+            network: %{},
+            connections: nil
 
   @type t :: %__MODULE__{}
 end
