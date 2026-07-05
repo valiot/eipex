@@ -15,7 +15,7 @@ defmodule Eipex.TestSupport.ScriptedTarget do
     parent = self()
     {:ok, listen} = :gen_tcp.listen(0, [:binary, packet: :raw, active: false, reuseaddr: true])
     {:ok, port} = :inet.port(listen)
-    {:ok, agent} = Agent.start_link(fn -> %{frames: [], socket: nil} end)
+    {:ok, agent} = Agent.start_link(fn -> %{frames: [], socket: nil, prefix_sent: false} end)
 
     pid =
       spawn_link(fn ->
@@ -56,7 +56,7 @@ defmodule Eipex.TestSupport.ScriptedTarget do
     case Encap.decode(buffer) do
       {:ok, frame, rest} ->
         Agent.update(agent, fn s -> %{s | frames: [frame | s.frames]} end)
-        handle_frame(socket, frame, handler, opts)
+        handle_frame(socket, frame, handler, agent, opts)
         drain(socket, rest, handler, agent, opts)
 
       :partial ->
@@ -64,12 +64,12 @@ defmodule Eipex.TestSupport.ScriptedTarget do
     end
   end
 
-  defp handle_frame(socket, %Encap{command: :register_session} = frame, _handler, _opts) do
+  defp handle_frame(socket, %Encap{command: :register_session} = frame, _handler, _agent, opts) do
     reply = %Encap{frame | session_handle: @session_handle}
-    :gen_tcp.send(socket, Encap.encode(reply))
+    :gen_tcp.send(socket, Encap.encode(reply) <> (opts[:register_trailer] || <<>>))
   end
 
-  defp handle_frame(socket, %Encap{command: :send_rr_data} = frame, handler, opts) do
+  defp handle_frame(socket, %Encap{command: :send_rr_data} = frame, handler, agent, opts) do
     if opts[:rst_after_reply] do
       # hold the reply briefly so a concurrent caller has a real window to
       # queue a second request behind this one before the reset lands
@@ -92,14 +92,30 @@ defmodule Eipex.TestSupport.ScriptedTarget do
           | sender_context: frame.sender_context
         }
 
-        send_reply(socket, Encap.encode(reply), opts)
+        send_reply(socket, Encap.encode(reply), opts, agent)
     end
   end
 
-  defp handle_frame(_socket, %Encap{command: :unregister_session}, _handler, _opts), do: :ok
-  defp handle_frame(_socket, %Encap{command: :nop}, _handler, _opts), do: :ok
+  defp handle_frame(_socket, %Encap{command: :unregister_session}, _handler, _agent, _opts),
+    do: :ok
 
-  defp send_reply(socket, binary, opts) do
+  defp handle_frame(_socket, %Encap{command: :nop}, _handler, _agent, _opts), do: :ok
+
+  defp send_reply(socket, binary, opts, agent) do
+    case opts[:reply_prefix] do
+      nil ->
+        :ok
+
+      prefix ->
+        already_sent =
+          Agent.get_and_update(agent, fn s -> {s.prefix_sent, %{s | prefix_sent: true}} end)
+
+        unless already_sent do
+          :gen_tcp.send(socket, prefix)
+          Process.sleep(5)
+        end
+    end
+
     if opts[:split_replies] do
       half = div(byte_size(binary), 2)
       <<a::binary-size(half), b::binary>> = binary

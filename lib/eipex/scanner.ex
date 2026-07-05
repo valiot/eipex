@@ -125,12 +125,13 @@ defmodule Eipex.Scanner do
     ]
 
     with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
-         {:ok, handle} <- register_session(socket, timeout) do
+         {:ok, handle, rest} <- register_session(socket, timeout) do
       :ok = :inet.setopts(socket, active: :once)
 
       state = %State{
         socket: socket,
         session_handle: handle,
+        buffer: rest,
         route_path: opts |> Keyword.get(:route_path, :none) |> normalize_route(),
         keepalive: Keyword.get(opts, :keepalive, @default_keepalive),
         timeout: timeout
@@ -164,6 +165,9 @@ defmodule Eipex.Scanner do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  rescue
+    exception ->
+      {:reply, {:error, {:invalid_request, Exception.message(exception)}}, state}
   end
 
   @impl true
@@ -222,12 +226,12 @@ defmodule Eipex.Scanner do
 
   defp register_session(socket, timeout) do
     with :ok <- :gen_tcp.send(socket, Encap.encode(Encap.register_session())),
-         {:ok, %Encap{command: :register_session, status: 0, session_handle: handle}} <-
+         {:ok, %Encap{command: :register_session, status: 0, session_handle: handle}, rest} <-
            recv_frame(socket, <<>>, timeout) do
-      {:ok, handle}
+      {:ok, handle, rest}
     else
-      {:ok, %Encap{command: command, status: 0}} -> {:error, {:unexpected_reply, command}}
-      {:ok, %Encap{status: status}} -> {:error, {:encap, Encap.status_name(status)}}
+      {:ok, %Encap{command: command, status: 0}, _rest} -> {:error, {:unexpected_reply, command}}
+      {:ok, %Encap{status: status}, _rest} -> {:error, {:encap, Encap.status_name(status)}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -236,7 +240,7 @@ defmodule Eipex.Scanner do
     case :gen_tcp.recv(socket, 0, timeout) do
       {:ok, data} ->
         case Encap.decode(buffer <> data) do
-          {:ok, frame, _rest} -> {:ok, frame}
+          {:ok, frame, rest} -> {:ok, frame, rest}
           :partial -> recv_frame(socket, buffer <> data, timeout)
         end
 
@@ -269,8 +273,13 @@ defmodule Eipex.Scanner do
       mr = MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))
 
       case request_route(opts, state) do
-        :none -> {:ok, mr}
-        route -> {:ok, ConnectionManager.encode_unconnected_send(mr, route, [])}
+        :none ->
+          {:ok, mr}
+
+        route ->
+          timeout = Keyword.get(opts, :timeout, state.timeout)
+          ticks = min(255, ceil(max(timeout, 10_000) / 1024))
+          {:ok, ConnectionManager.encode_unconnected_send(mr, route, timeout_ticks: ticks)}
       end
     else
       :error -> {:error, :missing_service}

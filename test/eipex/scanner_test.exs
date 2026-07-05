@@ -4,6 +4,7 @@ defmodule Eipex.ScannerTest do
   alias Eipex.Scanner
   alias Eipex.TestSupport.ScriptedTarget
   alias Eipex.CIP.MessageRouter
+  alias Eipex.Encap
 
   defp noop_handler, do: fn _mr -> :no_reply end
 
@@ -362,6 +363,71 @@ defmodule Eipex.ScannerTest do
 
       assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :connection_lost}}, 1_000
       refute_received {:DOWN, ^ref, :process, ^pid, {{:badmatch, _}, _}}
+    end
+  end
+
+  describe "deferred hardening" do
+    test "bytes pipelined after RegisterSession are not lost" do
+      # target sends: register reply + FIRST HALF of a NOP frame in one packet;
+      # then, before the first request's reply, the SECOND HALF of that NOP.
+      nop = Encap.encode(Encap.nop())
+      half = div(byte_size(nop), 2)
+      <<nop_a::binary-size(half), nop_b::binary>> = nop
+
+      target =
+        ScriptedTarget.start(get_attr_handler(<<1>>),
+          register_trailer: nop_a,
+          reply_prefix: nop_b
+        )
+
+      pid = start_scanner(target)
+
+      # pre-fix: nop_a is discarded, so nop_b + reply misalign and this times out
+      assert {:ok, %{data: <<1>>}} =
+               Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1, timeout: 500)
+
+      Scanner.close(pid)
+    end
+
+    test "an invalid request errors without killing the session" do
+      target = ScriptedTarget.start(get_attr_handler(<<2>>))
+      pid = start_scanner(target)
+
+      long = String.duplicate("a", 300)
+
+      assert {:error, {:invalid_request, _}} =
+               Scanner.generic_message(pid, service: 0x4C, symbolic: long)
+
+      # session survives and still works
+      assert {:ok, %{data: <<2>>}} =
+               Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1)
+
+      Scanner.close(pid)
+    end
+
+    test "routed requests derive timeout ticks from the request timeout" do
+      test_pid = self()
+
+      handler = fn mr ->
+        {:ok, %{service: 0x52, data: data}} = MessageRouter.decode_request(mr)
+        {:ok, decoded} = Eipex.CIP.ConnectionManager.decode_unconnected_send(data)
+        send(test_pid, {:ticks, decoded.timeout_ticks})
+        MessageRouter.encode_response(0x0E, 0x00, data: <<1>>)
+      end
+
+      target = ScriptedTarget.start(handler)
+      pid = start_scanner(target, route_path: [backplane: 0])
+
+      {:ok, _} =
+        Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1, timeout: 30_000)
+
+      assert_receive {:ticks, 30}
+
+      {:ok, _} = Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1)
+      # default 5s request timeout -> 10s spec floor -> ceil(10_000/1024) = 10
+      assert_receive {:ticks, 10}
+
+      Scanner.close(pid)
     end
   end
 end
