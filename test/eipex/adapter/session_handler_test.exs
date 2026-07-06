@@ -202,4 +202,16 @@ defmodule Eipex.Adapter.SessionHandlerTest do
     send_frame(socket, Encap.send_rr_data(1, <<>>))
     assert %Encap{status: 0x0064} = recv_frame(socket)
   end
+
+  test "register session with nonzero option flags answers 0x0069" do
+    {_pid, port} = start_adapter()
+    socket = connect(port)
+
+    bad = %Encap{command: :register_session, data: <<1::16-little, 1::16-little>>}
+    send_frame(socket, bad)
+
+    reply = recv_frame(socket)
+    assert reply.status == 0x0069
+    assert reply.data == <<1::16-little, 0::16-little>>
+  end
 end

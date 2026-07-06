@@ -1,8 +1,21 @@
 defmodule Eipex.Adapter.Object.ConnectionManager do
   @moduledoc """
-  Connection Manager object (class 0x06), UCMM subset: Unconnected Send is
-  unwrapped and dispatched locally (single-hop routes are accepted — this
-  device is the target). Forward Open/Close arrive in Phase 4.
+  Connection Manager object (class 0x06).
+
+  UCMM subset: Unconnected Send is unwrapped and dispatched locally
+  (single-hop routes are accepted — this device is the target).
+
+  Forward Open/Forward Close are implemented for transport class 3
+  (explicit messaging over a connection); class 0/1 (implicit I/O) arrive
+  in Phase 5.
+
+  Deviation from spec §5: class 3 connections have no per-connection
+  inactivity watchdog in this version. A real target closes a connection
+  once `o2t_rpi * timeout_multiplier` elapses without traffic; here a
+  connection is only released when its owning TCP session ends (clean
+  unregister, socket close, or crash) — see `ConnectionTable`'s
+  monitor-based cleanup. Callers that need timely reclamation must close
+  the encapsulation session or issue Forward Close explicitly.
   """
 
   @behaviour Eipex.Adapter.Object
@@ -39,7 +52,9 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
         triad = {fc.connection_serial, fc.originator_vendor_id, fc.originator_serial}
 
         case Eipex.Adapter.ConnectionTable.unregister(ctx.connections, triad) do
-          {:ok, _record} ->
+          {:ok, record} ->
+            send(ctx.session, {:connection_closed, record.o2t_id})
+
             {:reply,
              CM.encode_forward_close_reply(%{
                connection_serial: fc.connection_serial,

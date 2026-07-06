@@ -57,6 +57,10 @@ defmodule Eipex.Adapter.SessionHandler do
     {:stop, {:shutdown, :inactivity_timeout}, state}
   end
 
+  def handle_info({:connection_closed, o2t_id}, state) do
+    {:noreply, %{state | conn_replies: Map.delete(state.conn_replies, o2t_id)}}
+  end
+
   # -- Frame handling ------------------------------------------------------------
 
   defp drain(%{closing: true} = state), do: state
@@ -74,7 +78,7 @@ defmodule Eipex.Adapter.SessionHandler do
         reply(state, %Encap{frame | status: 0x0001})
         state
 
-      not match?(<<1::16-little, _flags::16-little>>, frame.data) ->
+      not match?(<<1::16-little, 0::16-little>>, frame.data) ->
         reply(state, %Encap{frame | status: 0x0069, data: <<1::16-little, 0::16-little>>})
         state
 
@@ -150,7 +154,7 @@ defmodule Eipex.Adapter.SessionHandler do
     end
   end
 
-  # send_unit_data (phase 4) and unknown commands: invalid command
+  # catch-all: any remaining/unknown encapsulation command is invalid
   defp handle_frame(state, %Encap{} = frame) do
     reply(state, %Encap{frame | status: 0x0001, data: <<>>})
     state

@@ -7,6 +7,11 @@ defmodule Eipex.Scanner do
   There is no automatic reconnection: when the connection drops, the
   process exits `{:shutdown, :connection_lost}` and the owning
   application decides whether and when to retry.
+
+  Also supports connected (class 3) messaging: `forward_open/2` and
+  `forward_close/1` establish and tear down a single connection per
+  session, after which `generic_message/2` can be routed over it with
+  `connected: true`.
   """
 
   use GenServer
@@ -50,11 +55,54 @@ defmodule Eipex.Scanner do
 
   defdelegate discover(opts \\ []), to: Eipex.Scanner.Discovery
 
+  @doc """
+  Opens a class 3 (explicit messaging) connection to the target.
+
+  Only one connection per scanner session is supported; a second call
+  while one is open (or already queued behind one) returns
+  `{:error, :already_connected}`.
+
+  ## Options
+
+    * `:variant` - `:large` (default) or `:standard`. `:large` sends a
+      Large Forward Open (0x5B, up to 65535-byte connection sizes); if the
+      target rejects it with a CIP error, the scanner automatically falls
+      back to a standard Forward Open (0x54) once. Passing `:standard`
+      skips the large attempt. Any other value returns
+      `{:error, {:invalid_request, :variant}}` without touching the
+      network.
+
+  On success, returns `{:ok, conn_info}` where `conn_info` is a map with
+  `:o2t_connection_id`, `:t2o_connection_id`, `:connection_serial`,
+  `:size` and `:variant` — enough to correlate the connection, not the
+  internal sequence counter or encoded path.
+
+  Note on timeouts: the request is built with a 10-tick, 10ms-per-tick
+  CIP timeout (~10s of wire budget for the target to answer), while the
+  scanner's own local wait defaults to 5s (`:timeout` at `start_link/1`,
+  overridable per session but not per call). A slow target can therefore
+  make this call return `{:error, :timeout}` locally while still
+  registering the connection on the target side; a subsequent
+  `forward_open/2` in that situation will observe `:already_connected`
+  from the target and fail, and only `forward_close/1` (or a fresh
+  session) will clear it.
+  """
   @spec forward_open(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
   def forward_open(server, opts \\ []) do
     GenServer.call(server, {:forward_open, opts}, :infinity)
   end
 
+  @doc """
+  Closes the scanner's current connection, if any.
+
+  Returns `:error, :no_connection` when no connection is open. A target
+  that answers with CIP error 0x01/extended 0x0107
+  (`:target_connection_not_found` — it already timed out or dropped the
+  connection, e.g. after its own inactivity watchdog fired) is treated as
+  a successful close: this call still returns `:ok` and the scanner
+  clears its local connection state, since there is nothing left to close
+  on either side.
+  """
   @spec forward_close(GenServer.server()) :: :ok | {:error, term()}
   def forward_close(server), do: GenServer.call(server, :forward_close, :infinity)
 

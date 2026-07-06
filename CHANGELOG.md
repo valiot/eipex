@@ -52,3 +52,4 @@
 - [Added] Connected loopback tests and pycomm3 connected-messaging interop
 - [Fixed] Scoped scanner request rescue; RegisterSession rejects unsupported versions
 - [Fixed] forward_open guard at dequeue, 0x0107 close handling, variant validation
+- [Fixed] Connected reply cache purge on close; watchdog deviation documented; flags check

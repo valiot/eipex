@@ -91,6 +91,44 @@ defmodule Eipex.Adapter.ConnectedSessionTest do
     fo_reply.o2t_connection_id
   end
 
+  defp close_connection(socket, handle, serial \\ 1) do
+    triad = %{
+      connection_serial: serial,
+      originator_vendor_id: 0x004D,
+      originator_serial: 0xDEAD_0001
+    }
+
+    mr = CM.encode_forward_close(triad, Path.encode(class: 0x02, instance: 0x01), [])
+    cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
+    send_frame(socket, Encap.send_rr_data(handle, cpf))
+
+    reply = recv_frame(socket)
+    {:ok, rcpf} = Encap.unwrap_cpf(reply)
+    {:ok, items} = CPF.decode(rcpf)
+    [{:unconnected_data, mr}] = for {:unconnected_data, _} = i <- items, do: i
+    MR.decode_response(mr)
+  end
+
+  defp session_handler_pid(adapter_pid) do
+    sessions_sup = :sys.get_state(adapter_pid).sessions_sup
+    [{_, session_pid, _, _}] = DynamicSupervisor.which_children(sessions_sup)
+    session_pid
+  end
+
+  defp wait_until(fun, deadline \\ System.monotonic_time(:millisecond) + 500) do
+    cond do
+      fun.() ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("condition not met within the deadline")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, deadline)
+    end
+  end
+
   defp unit_frame(handle, conn_id, seq, mr) do
     cpf =
       CPF.encode([
@@ -176,6 +214,24 @@ defmodule Eipex.Adapter.ConnectedSessionTest do
 
     send_frame(socket, Encap.send_unit_data(handle, <<0xFF>>))
     assert %Encap{command: :send_unit_data, status: 0x0003} = recv_frame(socket)
+  end
+
+  test "forward close purges the session's cached reply for that connection" do
+    {pid, port} = start_adapter()
+    socket = connect(port)
+    handle = register(socket)
+    o2t = open_connection(socket, handle)
+
+    mr = MR.encode_request(0x0E, class: 0x01, instance: 1, attribute: 1)
+    send_frame(socket, unit_frame(handle, o2t, 1, mr))
+    {_id, 1, %{status_name: :success}} = unit_response(recv_frame(socket))
+
+    session_pid = session_handler_pid(pid)
+    assert map_size(:sys.get_state(session_pid).conn_replies) == 1
+
+    assert {:ok, %{status_name: :success}} = close_connection(socket, handle)
+
+    assert wait_until(fn -> :sys.get_state(session_pid).conn_replies == %{} end)
   end
 
   test "a connection opened on one session is not servable from another" do
