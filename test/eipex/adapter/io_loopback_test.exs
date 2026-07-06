@@ -387,6 +387,11 @@ defmodule Eipex.Adapter.IoLoopbackTest do
     test "scanner watchdog fires when the adapter's io connection dies" do
       {adapter, scanner} = start_scanner_pair()
       assert {:ok, io} = open_scanner_io(scanner)
+      # monitor before triggering the kill: io notifies :timeout and then
+      # stops in the same callback, so monitoring only after the notification
+      # would race the process's own exit (Process.monitor/1 on an already
+      # -dead pid reports :noproc instead of the real reason)
+      io_ref = Process.monitor(io)
 
       assert_receive {:eipex_io, ^io, :data, _}, 1_000
 
@@ -400,8 +405,6 @@ defmodule Eipex.Adapter.IoLoopbackTest do
       # no more T->O traffic reaches the scanner: its watchdog fires, notifies
       # the owner and the io connection stops (normal exit, no crash)
       assert_receive {:eipex_io, ^io, :timeout}, 1_000
-
-      io_ref = Process.monitor(io)
       assert_receive {:DOWN, ^io_ref, :process, ^io, :normal}, 1_000
 
       Scanner.close(scanner)
