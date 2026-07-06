@@ -75,3 +75,4 @@
 - [Added] Scanner Logix write with type inference from catalog or value
 - [Fixed] Logix write validates explicit types, catalog structs, and out-of-range float inference
 - [Added] cpppo interop for Logix read/write/bulk
+- [Added] Scanner Logix documentation and usage example

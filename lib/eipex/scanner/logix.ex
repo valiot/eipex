@@ -1,13 +1,58 @@
 defmodule Eipex.Scanner.Logix do
   @moduledoc """
-  Logix tag discovery over the Symbol (0x6B) and Template (0x6C) objects
-  (1756-PM020).
+  Logix tag interface for discovering and reading/writing typed values.
 
-  `tag_list/2` walks the Symbol Object's Get_Instance_Attribute_List service
-  (0x55), following its `:partial_transfer` continuations, then fetches each
-  distinct structured tag's UDT definition from the Template Object exactly
-  once (attributes via Get_Attribute_List, then a fragmented Read Template
-  loop).
+  Provides high-level tag operations over the Logix Symbol (0x6B) and Template
+  (0x6C) objects via the scanner's `generic_message/2`. All wire I/O rides the
+  session's configured connection (UCMM by default, or an open class 3
+  connection via `connected: true`).
+
+  ## Tag Discovery and Structure Decoding
+
+  `tag_list/2` discovers all tags and fetches UDT (User Defined Type)
+  templates. It returns a `%{tags: [...], templates: %{...}}` catalog where:
+  - `tags` is a list of `%Eipex.Scanner.Logix.Tag{}` structs with type info
+    (atomic, array, or struct)
+  - `templates` is a registry of UDT definitions keyed by their Logix handle
+
+  To decode structured tags into member maps, pass the catalog to `read/3`
+  via `opts[:tags]`. Without it, structured tags come back raw as
+  `{:struct, handle, bytes}`.
+
+  Example:
+
+      {:ok, catalog} = Eipex.Scanner.Logix.tag_list(scanner)
+      # catalog.templates now contains all UDT definitions
+      {:ok, tag} = Eipex.Scanner.Logix.read(scanner, "Motor", tags: catalog)
+      # If "Motor" is a struct, tag.value is a member map; else a scalar
+
+  ## Read / Write Operations
+
+  `read/3` supports single or bulk reads of tags, with automatic Multiple
+  Service Packet (MSP) batching and fragmentation for large values. Bulk
+  reads are kept under a size threshold (default 500 bytes, configurable);
+  per-tag errors are captured in the result, never crash the batch.
+
+  `write/4` resolves a value's type from an explicit opt, the catalog, or
+  inference from the value itself (boolean → `:bool`, integer → `:dint`,
+  float → `:real`).
+
+  ## Scope and Limitations
+
+  - **Structure writes unsupported** — `write/4` rejects struct values with
+    `:struct_write_unsupported`. Atomics and arrays are supported.
+  - **Deep nesting best-effort** — UDT members may contain nested structs up
+    to two levels; beyond that, nesting is decoded best-effort using
+    template offsets (documented in `Eipex.Scanner.Logix.Value`).
+  - **Array-element addressing not yet supported** — Tag names like
+    `"Array[0]"` are sent as-is (one symbolic segment); use whole-array reads
+    or address elements via separate tag definitions. Bulk reads accept tag
+    names in any symbolic form the controller supports.
+  - **Tag list over UCMM only** — Symbol and Template Objects are discovered
+    and fetched via UCMM (service 0x55, 0x03, 0x4C); a `connected: true`
+    option on read/write does not apply to `tag_list/2`.
+
+  Refer to 1756-PM020 for Logix device details.
   """
 
   alias Eipex.CIP.Logix, as: LogixCodec
