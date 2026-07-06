@@ -557,4 +557,79 @@ defmodule Eipex.Scanner.Logix do
   defp element_byte_size(name) when name in [:dint, :udint, :dword, :real], do: 4
   defp element_byte_size(name) when name in [:lint, :ulint, :lword, :lreal], do: 8
   defp element_byte_size(_name), do: nil
+
+  # -- Tag write (service 0x4D) -------------------------------------------------
+
+  @doc """
+  Writes a value to a tag.
+
+  Resolves the tag's type in this order: `opts[:type]` if given; else inferred
+  from the tag's type in `opts[:tags]` catalog; else inferred from the value
+  (boolean → `:bool`, integer in DINT range → `:dint`, float → `:real`); else
+  `{:error, :unknown_type}`.
+
+  Encodes the value via `Value.encode/3` and sends a Write Tag request
+  (service 0x4D). Returns `:ok` on success; on a CIP error, returns
+  `{:error, {:cip, status_name, extended}}`; `:struct_write_unsupported` from
+  the encoder propagates as-is.
+  """
+  @spec write(GenServer.server(), String.t(), term(), keyword()) ::
+          :ok | {:error, term()}
+  def write(server, name, value, opts \\ [])
+
+  def write(server, name, value, opts) do
+    templates = templates_of(opts)
+
+    with {:ok, type} <- resolve_write_type(name, value, opts),
+         {:ok, {type_prefix, bytes}} <- Value.encode(value, type, templates),
+         elements = Keyword.get(opts, :elements, 1),
+         data = type_prefix <> <<elements::16-little>> <> bytes,
+         {:ok, %{status_name: :success}} <-
+           Scanner.generic_message(server, service: 0x4D, symbolic: name, data: data) do
+      :ok
+    else
+      {:ok, %{status_name: status_name, extended: extended}} ->
+        {:error, {:cip, status_name, extended}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Type resolution for write: explicit type, catalog, or inferred from value
+  defp resolve_write_type(name, value, opts) do
+    cond do
+      opts[:type] ->
+        {:ok, opts[:type]}
+
+      catalog = opts[:tags] ->
+        case Enum.find(catalog.tags, &(&1.name == name)) do
+          %Tag{type: type} when is_atom(type) -> {:ok, type}
+          nil -> infer_write_type(value)
+          _other -> {:error, :unknown_type}
+        end
+
+      true ->
+        infer_write_type(value)
+    end
+  end
+
+  # Infer type from the value itself
+  defp infer_write_type(value) when is_boolean(value), do: {:ok, :bool}
+
+  defp infer_write_type(value) when is_integer(value) do
+    # DINT range check: -2,147,483,648 to 2,147,483,647
+    if value >= -2_147_483_648 and value <= 2_147_483_647 do
+      {:ok, :dint}
+    else
+      {:error, :unknown_type}
+    end
+  end
+
+  defp infer_write_type(value) when is_float(value), do: {:ok, :real}
+
+  # Detect maps as struct attempts (will be rejected by Value.encode with proper error)
+  defp infer_write_type(value) when is_map(value), do: {:ok, {:struct, 0}}
+
+  defp infer_write_type(_value), do: {:error, :unknown_type}
 end

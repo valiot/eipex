@@ -359,4 +359,70 @@ defmodule Eipex.Scanner.LogixTest do
 
     Scanner.close(plc)
   end
+
+  # -- Tag write -----------------------------------------------------------------
+
+  defp write_spec do
+    catalog_spec()
+    |> Map.put(:tags, %{
+      "Counter" => {:dint, 0},
+      "Flag" => {:bool, false}
+    })
+  end
+
+  test "write/3 writes a DINT by type inference and returns :ok" do
+    {plc, _target} = start_plc_with_target(write_spec())
+
+    assert :ok = Logix.write(plc, "Counter", 42)
+
+    # Verify via read-back
+    assert {:ok, %Eipex.Tag{name: "Counter", value: 42, error: nil}} =
+             Logix.read(plc, "Counter")
+
+    Scanner.close(plc)
+  end
+
+  test "write/3 writes a BOOL with explicit type and returns :ok" do
+    {plc, _target} = start_plc_with_target(write_spec())
+
+    assert :ok = Logix.write(plc, "Flag", true, type: :bool)
+
+    # Verify via read-back
+    assert {:ok, %Eipex.Tag{name: "Flag", value: true, error: nil}} =
+             Logix.read(plc, "Flag")
+
+    Scanner.close(plc)
+  end
+
+  test "write/3 returns error on type mismatch" do
+    {plc, _target} = start_plc_with_target(write_spec())
+
+    # Try to write 42 as a bool (type mismatch)
+    assert {:error, {:cip, :general_error, [0x2107]}} =
+             Logix.write(plc, "Flag", 42)
+
+    Scanner.close(plc)
+  end
+
+  test "write/3 returns struct_write_unsupported error for structured tags" do
+    {plc, _target} = start_plc_with_target(write_spec())
+
+    assert {:error, :struct_write_unsupported} =
+             Logix.write(plc, "Motor", %{"running" => true})
+
+    Scanner.close(plc)
+  end
+
+  test "write/3 infers type from catalog when provided" do
+    {plc, _target} = start_plc_with_target(write_spec())
+    {:ok, catalog} = Logix.tag_list(plc)
+
+    assert :ok = Logix.write(plc, "Counter", 99, tags: catalog)
+
+    # Verify via read-back
+    assert {:ok, %Eipex.Tag{name: "Counter", value: 99, error: nil}} =
+             Logix.read(plc, "Counter")
+
+    Scanner.close(plc)
+  end
 end

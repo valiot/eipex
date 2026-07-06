@@ -72,3 +72,4 @@
 - [Fixed] tag_list rejects empty partial-transfer symbol lists and template chunks
 - [Added] Scanner Logix read: typed values, bulk Multiple Service Packet, auto fragmentation
 - [Fixed] Bulk read accounts for MSP framing overhead and falls back when a batch is refused
+- [Added] Scanner Logix write with type inference from catalog or value
