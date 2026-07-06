@@ -71,3 +71,4 @@
 - [Added] Scanner Logix tag_list: Symbol Object discovery with UDT template fetch
 - [Fixed] tag_list rejects empty partial-transfer symbol lists and template chunks
 - [Added] Scanner Logix read: typed values, bulk Multiple Service Packet, auto fragmentation
+- [Fixed] Bulk read accounts for MSP framing overhead and falls back when a batch is refused

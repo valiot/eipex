@@ -259,4 +259,104 @@ defmodule Eipex.Scanner.LogixTest do
 
     Scanner.close(plc)
   end
+
+  # -- MSP framing overhead accounting + too-large fallback --------------------
+
+  # Mimics a real controller: an MSP reply is only accepted if its actual
+  # encoded size (Multiple Service Packet envelope: 2-byte count + one
+  # 2-byte offset per sub-reply + each sub-reply's own 4-byte MR header +
+  # data) fits under `connection_size`; otherwise the whole request comes
+  # back with outer status 0x11 (reply_data_too_large), exactly as a PLC
+  # would refuse an over-budget Multiple Service Packet.
+  defp dint_reply(value),
+    do: <<Eipex.CIP.Types.type_code(:dint)::16-little, value::32-little-signed>>
+
+  defp tag_name_from_path(path) do
+    {:ok, segments} = Eipex.CIP.Path.decode(path)
+    Keyword.fetch!(segments, :symbolic)
+  end
+
+  defp size_capped_msp_handler(values, connection_size) do
+    fn mr_request ->
+      {:ok, %{service: service, path: path, data: data}} =
+        Eipex.CIP.MessageRouter.decode_request(mr_request)
+
+      case service do
+        0x4C ->
+          value = Map.fetch!(values, tag_name_from_path(path))
+          Eipex.CIP.MessageRouter.encode_response(0x4C, 0x00, data: dint_reply(value))
+
+        0x0A ->
+          {:ok, requests} = Eipex.CIP.Logix.decode_multiple_service_reply(data)
+
+          replies =
+            for request <- requests do
+              {:ok, %{path: sub_path}} = Eipex.CIP.MessageRouter.decode_request(request)
+              value = Map.fetch!(values, tag_name_from_path(sub_path))
+              Eipex.CIP.MessageRouter.encode_response(0x4C, 0x00, data: dint_reply(value))
+            end
+
+          reply_data = Eipex.CIP.Logix.multiple_service_data(replies)
+
+          if byte_size(reply_data) > connection_size do
+            Eipex.CIP.MessageRouter.encode_response(0x0A, 0x11)
+          else
+            Eipex.CIP.MessageRouter.encode_response(0x0A, 0x00, data: reply_data)
+          end
+      end
+    end
+  end
+
+  test "read/2 bulk read accounts for MSP framing overhead when sizing batches" do
+    names = for n <- 1..10, do: "T#{n}"
+    values = for n <- 1..10, into: %{}, do: {"T#{n}", n * 111}
+
+    # Ten tiny DINT tags: their raw data (6 bytes each) sums to 60, well
+    # under 100 either way. But the real MSP envelope also carries a 2-byte
+    # offset entry and a 4-byte MR reply header per sub-reply (12 bytes each
+    # total), so the true reply for all ten is 122 bytes — over the 100-byte
+    # connection_size. An estimate that ignores that framing overhead packs
+    # every tag into a single oversized MSP, which this handler (correctly
+    # modeling a real controller) refuses outright; an estimate that
+    # accounts for it splits the tags across multiple batches that each fit.
+    handler = size_capped_msp_handler(values, 100)
+    target = ScriptedTarget.start(handler)
+    {:ok, plc} = Scanner.start_link(host: {127, 0, 0, 1}, port: target.port)
+
+    assert {:ok, results} = Logix.read(plc, names, connection_size: 100)
+
+    assert Enum.map(results, & &1.name) == names
+    assert Enum.map(results, & &1.error) == List.duplicate(nil, 10)
+    assert Enum.map(results, & &1.value) == Enum.map(names, &Map.fetch!(values, &1))
+
+    Scanner.close(plc)
+  end
+
+  test "read/2 falls back to individual reads when the whole MSP is refused as too large" do
+    values = %{"A" => 10, "B" => 20, "C" => 30}
+
+    handler = fn mr_request ->
+      {:ok, %{service: service, path: path}} = Eipex.CIP.MessageRouter.decode_request(mr_request)
+
+      case service do
+        0x0A ->
+          Eipex.CIP.MessageRouter.encode_response(0x0A, 0x11)
+
+        0x4C ->
+          value = Map.fetch!(values, tag_name_from_path(path))
+          Eipex.CIP.MessageRouter.encode_response(0x4C, 0x00, data: dint_reply(value))
+      end
+    end
+
+    target = ScriptedTarget.start(handler)
+    {:ok, plc} = Scanner.start_link(host: {127, 0, 0, 1}, port: target.port)
+
+    assert {:ok, [a, b, c]} = Logix.read(plc, ["A", "B", "C"], connection_size: 200)
+
+    assert %Eipex.Tag{name: "A", value: 10, error: nil} = a
+    assert %Eipex.Tag{name: "B", value: 20, error: nil} = b
+    assert %Eipex.Tag{name: "C", value: 30, error: nil} = c
+
+    Scanner.close(plc)
+  end
 end

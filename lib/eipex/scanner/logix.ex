@@ -22,6 +22,15 @@ defmodule Eipex.Scanner.Logix do
   @default_tag_estimate 8
   @multiple_service_path [class: 0x02, instance: 1]
 
+  # MSP reply framing: 2-byte service-count + one 2-byte offset per reply
+  @msp_reply_overhead 2
+  @msp_per_reply_overhead 6
+
+  # Outer MSP CIP statuses meaning "the reply as a whole didn't fit the
+  # connection" rather than a per-tag failure — worth retrying as
+  # individual reads instead of erroring the batch.
+  @msp_too_large_statuses [:reply_data_too_large, :partial_transfer]
+
   defmodule Tag do
     @moduledoc """
     One entry from the Symbol Object catalog.
@@ -237,12 +246,16 @@ defmodule Eipex.Scanner.Logix do
 
   A list of names is read in batches packed into Multiple Service Packets,
   each batch kept under `opts[:connection_size]` (default 500 bytes) by an
-  estimate of each tag's encoded reply size; a tag whose estimate alone
-  exceeds the threshold is read individually instead (fragmented if needed,
-  never inside an MSP). A batched sub-reply that turns out too big
-  (`:partial_transfer`) falls back to an individual fragmented read for that
-  one tag. Returns `{:ok, [%Eipex.Tag{}]}` in the same order as the input
-  list.
+  estimate of each tag's encoded reply size *plus* its MSP framing overhead
+  (the sub-reply's own MR reply header and offset-table entry); a tag whose
+  estimate alone (with that overhead) exceeds the threshold is read
+  individually instead (fragmented if needed, never inside an MSP). A
+  batched sub-reply that turns out too big (`:partial_transfer`) falls back
+  to an individual fragmented read for that one tag; if the whole MSP is
+  refused as too large for the connection (`:reply_data_too_large` or
+  `:partial_transfer` on the outer reply), every tag in that batch is
+  re-read individually instead of erroring the batch. Returns
+  `{:ok, [%Eipex.Tag{}]}` in the same order as the input list.
 
   `opts[:tags]` is the `%{tags: [...], templates: %{...}}` catalog from
   `tag_list/2`; its `:templates` registry lets structured tags decode into
@@ -271,7 +284,7 @@ defmodule Eipex.Scanner.Logix do
 
     {oversized, batchable} =
       Enum.split_with(indexed, fn {name, _index} ->
-        tag_estimate(name, catalog) > connection_size
+        sub_reply_size(name, catalog) + @msp_reply_overhead > connection_size
       end)
 
     batches = batch_by_size(batchable, catalog, connection_size)
@@ -399,13 +412,14 @@ defmodule Eipex.Scanner.Logix do
 
   defp batch_by_size(indexed, catalog, connection_size) do
     {done, current, _sum} =
-      Enum.reduce(indexed, {[], [], 0}, fn {name, _index} = item, {done, current, sum} ->
-        size = tag_estimate(name, catalog)
+      Enum.reduce(indexed, {[], [], @msp_reply_overhead}, fn {name, _index} = item,
+                                                             {done, current, sum} ->
+        size = sub_reply_size(name, catalog)
 
         cond do
-          current == [] -> {done, [item], size}
+          current == [] -> {done, [item], @msp_reply_overhead + size}
           sum + size <= connection_size -> {done, [item | current], sum + size}
-          true -> {done ++ [Enum.reverse(current)], [item], size}
+          true -> {done ++ [Enum.reverse(current)], [item], @msp_reply_overhead + size}
         end
       end)
 
@@ -443,7 +457,11 @@ defmodule Eipex.Scanner.Logix do
         end
 
       {:ok, %{status_name: status_name, extended: extended}} ->
-        {:ok, tag_errors(batch, {:cip, status_name, extended})}
+        if status_name in @msp_too_large_statuses do
+          read_each(server, batch, opts, templates)
+        else
+          {:ok, tag_errors(batch, {:cip, status_name, extended})}
+        end
 
       {:error, _} = error ->
         error
@@ -504,6 +522,13 @@ defmodule Eipex.Scanner.Logix do
   end
 
   # -- Size estimation for MSP batching -----------------------------------------
+
+  # A tag's estimated contribution to the MSP reply *envelope*: its own
+  # data-only estimate plus the per-sub-reply framing (the ~4-byte MR reply
+  # header and the 2-byte offset-table entry each sub-reply costs on top of
+  # its data). Batch totals also need `@msp_reply_overhead` (the 2-byte
+  # service count) once per batch — see `batch_by_size/3`.
+  defp sub_reply_size(name, catalog), do: tag_estimate(name, catalog) + @msp_per_reply_overhead
 
   defp tag_estimate(name, %{tags: tags, templates: templates}) do
     case Enum.find(tags, &(&1.name == name)) do
