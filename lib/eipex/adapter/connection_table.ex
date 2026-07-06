@@ -35,11 +35,22 @@ defmodule Eipex.Adapter.ConnectionTable do
 
       true ->
         o2t_id = state.next_id
-        record = Map.merge(info, %{triad: triad, session: session_pid, o2t_id: o2t_id})
+        info_with_kind = Map.put_new(info, :kind, :explicit)
+        record = Map.merge(info_with_kind, %{triad: triad, session: session_pid, o2t_id: o2t_id})
 
         monitors =
-          Map.put_new_lazy(state.monitors, session_pid, fn ->
+          state.monitors
+          |> Map.put_new_lazy(session_pid, fn ->
             Process.monitor(session_pid)
+          end)
+          |> then(fn monitors ->
+            if pid = info_with_kind[:pid] do
+              Map.put_new_lazy(monitors, pid, fn ->
+                Process.monitor(pid)
+              end)
+            else
+              monitors
+            end
           end)
 
         {:reply, {:ok, o2t_id},
@@ -76,7 +87,9 @@ defmodule Eipex.Adapter.ConnectionTable do
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     {dead, by_triad} =
-      Enum.split_with(state.by_triad, fn {_triad, record} -> record.session == pid end)
+      Enum.split_with(state.by_triad, fn {_triad, record} ->
+        record.session == pid or record[:pid] == pid
+      end)
 
     by_o2t = Enum.reduce(dead, state.by_o2t, fn {_t, r}, acc -> Map.delete(acc, r.o2t_id) end)
 

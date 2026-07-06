@@ -53,3 +53,4 @@
 - [Fixed] Scoped scanner request rescue; RegisterSession rejects unsupported versions
 - [Fixed] forward_open guard at dequeue, 0x0107 close handling, variant validation
 - [Fixed] Connected reply cache purge on close; watchdog deviation documented; flags check
+- [Added] Implicit I/O helpers, handler I/O callbacks and connection-table I/O records

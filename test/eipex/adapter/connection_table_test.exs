@@ -55,4 +55,40 @@ defmodule Eipex.Adapter.ConnectionTableTest do
     # triad reusable after cleanup
     assert {:ok, _} = ConnectionTable.register(table, @triad, %{t2o_connection_id: 2}, self())
   end
+
+  test "io records carry kind and pid, and die with the pid" do
+    {:ok, table} = ConnectionTable.start_link(max: 8)
+
+    statem =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    triad = {9, 0x004D, 0xDEAD_0009}
+
+    assert {:ok, o2t} =
+             ConnectionTable.register(
+               table,
+               triad,
+               %{t2o_connection_id: 42, kind: :io, pid: statem},
+               self()
+             )
+
+    assert {:ok, %{kind: :io, pid: ^statem}} = ConnectionTable.lookup_o2t(table, o2t)
+
+    send(statem, :stop)
+    Process.sleep(50)
+    assert :error = ConnectionTable.lookup_o2t(table, o2t)
+  end
+
+  test "explicit records default kind" do
+    {:ok, table} = ConnectionTable.start_link(max: 8)
+
+    {:ok, o2t} =
+      ConnectionTable.register(table, {1, 1, 1}, %{t2o_connection_id: 1}, self())
+
+    assert {:ok, %{kind: :explicit}} = ConnectionTable.lookup_o2t(table, o2t)
+  end
 end
