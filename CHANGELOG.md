@@ -49,3 +49,4 @@
 - [Added] Scanner connected requests over SendUnitData with sequence counts
 - [Added] Adapter class 3 Forward Open/Close with connection table and capacity
 - [Added] Adapter serves connected requests with sequence dedup and reply caching
+- [Added] Connected loopback tests and pycomm3 connected-messaging interop

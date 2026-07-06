@@ -71,5 +71,16 @@ bad = driver.generic_message(
 )
 results["unknown_class_errors"] = bad.error is not None
 
+connected = driver.generic_message(
+    service=Services.get_attribute_single,
+    class_code=1,
+    instance=1,
+    attribute=1,
+    connected=True,
+    name="connected_read",
+)
+results["connected_ok"] = connected.error is None
+results["connected_vendor"] = list(connected.value) if connected.value else None
+
 driver.close()
 print(json.dumps(results))

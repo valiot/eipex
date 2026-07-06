@@ -59,5 +59,7 @@ defmodule Eipex.Interop.Pycomm3Test do
     assert results["write_ok"]
     assert results["readback_ok"]
     assert results["unknown_class_errors"]
+    assert results["connected_ok"]
+    assert results["connected_vendor"] == [0x4D, 0x00]
   end
 end
