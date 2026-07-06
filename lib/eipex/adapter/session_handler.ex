@@ -69,13 +69,19 @@ defmodule Eipex.Adapter.SessionHandler do
   end
 
   defp handle_frame(state, %Encap{command: :register_session} = frame) do
-    if state.session_handle do
-      reply(state, %Encap{frame | status: 0x0001})
-      state
-    else
-      handle = :erlang.unique_integer([:positive]) |> rem(0xFFFF_FFFE) |> Kernel.+(1)
-      reply(state, %Encap{frame | session_handle: handle})
-      %{state | session_handle: handle}
+    cond do
+      not is_nil(state.session_handle) ->
+        reply(state, %Encap{frame | status: 0x0001})
+        state
+
+      not match?(<<1::16-little, _flags::16-little>>, frame.data) ->
+        reply(state, %Encap{frame | status: 0x0069, data: <<1::16-little, 0::16-little>>})
+        state
+
+      true ->
+        handle = :erlang.unique_integer([:positive]) |> rem(0xFFFF_FFFE) |> Kernel.+(1)
+        reply(state, %Encap{frame | session_handle: handle})
+        %{state | session_handle: handle}
     end
   end
 

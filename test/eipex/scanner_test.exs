@@ -429,5 +429,18 @@ defmodule Eipex.ScannerTest do
 
       Scanner.close(pid)
     end
+
+    test "rescue is scoped to request building only" do
+      # a post-build crash must NOT be converted into {:error, {:invalid_request, _}}:
+      # kill the socket out from under the scanner and check the loss contract
+      Process.flag(:trap_exit, true)
+      target = ScriptedTarget.start(get_attr_handler(<<1>>))
+      pid = start_scanner(target)
+      %{socket: socket} = :sys.get_state(pid)
+      :gen_tcp.close(socket)
+
+      result = Scanner.generic_message(pid, service: 0x0E, class: 1, instance: 1)
+      assert result == {:error, :connection_lost}
+    end
   end
 end

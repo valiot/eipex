@@ -162,21 +162,30 @@ defmodule Eipex.Scanner do
 
   @impl true
   def handle_call({:request, opts}, from, state) do
-    if Keyword.get(opts, :connected, false) do
-      connected_request(opts, from, state)
-    else
-      case build_request(opts, state) do
-        {:ok, mr} ->
-          timeout = Keyword.get(opts, :timeout, state.timeout)
-          dispatch_request(state, from, mr, timeout, :request)
-
-        {:error, reason} ->
-          {:reply, {:error, reason}, state}
+    built =
+      try do
+        if Keyword.get(opts, :connected, false) do
+          :connected
+        else
+          build_request(opts, state)
+        end
+      rescue
+        exception -> {:invalid, Exception.message(exception)}
       end
+
+    case built do
+      :connected ->
+        connected_request(opts, from, state)
+
+      {:invalid, message} ->
+        {:reply, {:error, {:invalid_request, message}}, state}
+
+      {:ok, mr} ->
+        dispatch_request(state, from, mr, Keyword.get(opts, :timeout, state.timeout), :request)
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
-  rescue
-    exception ->
-      {:reply, {:error, {:invalid_request, Exception.message(exception)}}, state}
   end
 
   @impl true
@@ -334,9 +343,22 @@ defmodule Eipex.Scanner do
   defp connected_request(opts, from, state) do
     with {:ok, service} <- Keyword.fetch(opts, :service),
          {:ok, path} <- request_path(opts) do
-      mr = MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))
-      timeout = Keyword.get(opts, :timeout, state.timeout)
-      dispatch_request(state, from, {:unit, mr}, timeout, :connected)
+      built =
+        try do
+          mr = MessageRouter.encode_request(service, path, Keyword.get(opts, :data, <<>>))
+          {:ok, mr}
+        rescue
+          exception -> {:invalid, Exception.message(exception)}
+        end
+
+      case built do
+        {:ok, mr} ->
+          timeout = Keyword.get(opts, :timeout, state.timeout)
+          dispatch_request(state, from, {:unit, mr}, timeout, :connected)
+
+        {:invalid, message} ->
+          {:reply, {:error, {:invalid_request, message}}, state}
+      end
     else
       :error -> {:reply, {:error, :missing_service}, state}
       {:error, _} = error -> {:reply, error, state}
