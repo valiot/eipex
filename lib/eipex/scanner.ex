@@ -122,9 +122,9 @@ defmodule Eipex.Scanner do
   ## Options
 
     * `:o_to_t` — originator-to-target assembly config (required). A keyword
-      list with at least `:assembly` (instance number) and `:rpi` (rate of
-      issuance in microseconds); optionally `:size` (defaults to assembly's
-      data size), `:run_idle` (boolean, defaults to false).
+      list with `:assembly` (instance number), `:rpi` (rate of issuance in
+      microseconds) and `:size` (assembly data size in bytes) all required;
+      optionally `:run_idle` (boolean, defaults to false).
     * `:t_to_o` — target-to-originator assembly config (required). Same
       structure as `:o_to_t`.
     * `:config` — optional configuration assembly instance, as a keyword list

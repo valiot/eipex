@@ -9,5 +9,6 @@ services:
 
   opener:
     build: ./opener
+    profiles: ["opener"]
     network_mode: host
     command: ["./src/ports/POSIX/OpENer", "lo"]

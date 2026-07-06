@@ -32,8 +32,15 @@ defmodule Eipex.Adapter.SessionHandler do
   @impl true
   def handle_cast(:activate, state) do
     :ok = :inet.setopts(state.socket, active: :once)
-    {:ok, {peer_ip, _port}} = :inet.peername(state.socket)
-    {:noreply, arm_inactivity(%{state | peer_ip: peer_ip})}
+
+    case :inet.peername(state.socket) do
+      {:ok, {peer_ip, _port}} ->
+        {:noreply, arm_inactivity(%{state | peer_ip: peer_ip})}
+
+      {:error, _reason} ->
+        # the peer may have RST'd the connection between accept and activate
+        {:stop, :normal, state}
+    end
   end
 
   @impl true

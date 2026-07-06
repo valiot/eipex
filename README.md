@@ -56,6 +56,6 @@ The adapter side is exercised with pycomm3:
 The scanner's class 1 I/O is validated against OpENer, the ODVA reference
 adapter (builds from source, binds host loopback):
 
-    docker compose -f interop/docker-compose.yml up -d --build opener
+    docker compose -f interop/docker-compose.yml --profile opener up -d --build opener
     mix test --include interop test/interop/opener_test.exs
     docker compose -f interop/docker-compose.yml down

@@ -22,7 +22,8 @@ defmodule Eipex.Interop.Pycomm3Test do
         ],
         assemblies: [output: [instance: 150, size: 4]],
         port: 44_821,
-        ip: {0, 0, 0, 0}
+        ip: {0, 0, 0, 0},
+        io_udp_port: 0
       )
 
     script = Path.expand("../../interop/pycomm3/check_adapter.py", __DIR__)

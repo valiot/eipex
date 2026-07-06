@@ -1,7 +1,7 @@
 defmodule Eipex.Interop.OpenerTest do
   @moduledoc """
   Interop against OpENer (the ODVA reference adapter, C).
-  Start it first: docker compose -f interop/docker-compose.yml up -d --build opener
+  Start it first: docker compose -f interop/docker-compose.yml --profile opener up -d --build opener
   Run with: mix test --include interop test/interop/opener_test.exs
   """
 
