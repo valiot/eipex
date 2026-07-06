@@ -84,8 +84,14 @@ defmodule Eipex.Scanner.Logix do
 
       {:ok, %{status_name: :partial_transfer, data: reply}} ->
         with {:ok, symbols} <- LogixCodec.decode_symbol_list(reply) do
-          next_instance = List.last(symbols).instance + 1
-          fetch_symbols(server, next_instance, acc ++ symbols)
+          case symbols do
+            [] ->
+              {:error, :malformed_symbol_list}
+
+            _ ->
+              next_instance = List.last(symbols).instance + 1
+              fetch_symbols(server, next_instance, acc ++ symbols)
+          end
         end
 
       {:ok, %{status_name: name, extended: extended}} ->
@@ -191,13 +197,17 @@ defmodule Eipex.Scanner.Logix do
         {:ok, acc <> chunk}
 
       {:ok, %{status_name: :partial_transfer, data: chunk}} ->
-        read_definition(
-          server,
-          template_instance,
-          offset + byte_size(chunk),
-          total_bytes,
-          acc <> chunk
-        )
+        if byte_size(chunk) > 0 do
+          read_definition(
+            server,
+            template_instance,
+            offset + byte_size(chunk),
+            total_bytes,
+            acc <> chunk
+          )
+        else
+          {:error, :malformed_template}
+        end
 
       {:ok, %{status_name: name, extended: extended}} ->
         {:error, {:cip, name, extended}}
