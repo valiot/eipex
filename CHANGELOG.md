@@ -57,3 +57,4 @@
 - [Added] CPF extras threaded through adapter dispatch for I/O sockaddr exchange
 - [Added] Adapter shared I/O UDP socket with connection-id demux
 - [Added] Adapter class 1 I/O connections: cyclic production, watchdog, run/idle
+- [Added] Scanner open_io: class 1 I/O connections with owner notifications

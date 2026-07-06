@@ -34,6 +34,7 @@ defmodule Eipex.Scanner do
               route_path: :none,
               keepalive: nil,
               timeout: nil,
+              host: nil,
               vendor_id: 0xFFFF,
               serial_number: 0,
               connection_serial_counter: 1,
@@ -105,6 +106,56 @@ defmodule Eipex.Scanner do
   """
   @spec forward_close(GenServer.server()) :: :ok | {:error, term()}
   def forward_close(server), do: GenServer.call(server, :forward_close, :infinity)
+
+  @doc """
+  Opens a class 1 (cyclic implicit I/O) connection to the target.
+
+  Starts (and links) an `Eipex.Scanner.IOConnection`, which owns its own UDP
+  socket and blocks in its `init/1` for the Forward Open transaction before
+  returning. See `Eipex.Scanner.IOConnection` for the options and the
+  notifications sent to `:owner`.
+
+  On a Forward Open rejection the statem's `init/1` stops with `{:stop,
+  reason}`; since `start_link` links the calling process, trapping exits for
+  the duration of the call keeps that failure a plain `{:error, reason}`
+  return here instead of taking the caller down too (mirrors OTP's own
+  `start_link` guidance for callers that are not supervisors).
+  """
+  @spec open_io(GenServer.server(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def open_io(server, opts) do
+    args = opts |> Map.new() |> Map.put(:scanner, server)
+    previous_trap = Process.flag(:trap_exit, true)
+
+    try do
+      Eipex.Scanner.IOConnection.start_link(args)
+    after
+      Process.flag(:trap_exit, previous_trap)
+    end
+  end
+
+  @doc """
+  Returns the resolved IPv4 address of the target, as connected to at
+  `start_link/1` time. Used by `Eipex.Scanner.IOConnection` to resolve
+  `{0, 0, 0, 0}` sockaddrs to a concrete peer.
+  """
+  @spec host(GenServer.server()) :: {:ok, :inet.ip4_address()}
+  def host(server), do: GenServer.call(server, :host)
+
+  @doc false
+  @spec io_forward_open(GenServer.server(), map(), :inet.port_number()) ::
+          {:ok, ConnectionManager.ForwardOpen.t(), response(), [CPF.item()]} | {:error, term()}
+  def io_forward_open(server, params, udp_port),
+    do: GenServer.call(server, {:io_forward_open, params, udp_port}, :infinity)
+
+  @doc false
+  @spec io_forward_close(
+          GenServer.server(),
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()},
+          binary()
+        ) ::
+          :ok | {:error, term()}
+  def io_forward_close(server, triad, path),
+    do: GenServer.call(server, {:io_forward_close, triad, path}, :infinity)
 
   @type response :: %{
           service: byte(),
@@ -184,7 +235,8 @@ defmodule Eipex.Scanner do
       send_timeout_close: true
     ]
 
-    with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
+    with {:ok, resolved_host} <- :inet.getaddr(host, :inet),
+         {:ok, socket} <- :gen_tcp.connect(resolved_host, port, socket_opts, timeout),
          {:ok, handle, rest} <- register_session(socket, timeout) do
       :ok = :inet.setopts(socket, active: :once)
 
@@ -195,6 +247,7 @@ defmodule Eipex.Scanner do
         route_path: opts |> Keyword.get(:route_path, :none) |> normalize_route(),
         keepalive: Keyword.get(opts, :keepalive, @default_keepalive),
         timeout: timeout,
+        host: resolved_host,
         vendor_id: Keyword.get(opts, :vendor_id, 0xFFFF),
         serial_number:
           Keyword.get_lazy(opts, :serial_number, fn ->
@@ -270,6 +323,29 @@ defmodule Eipex.Scanner do
 
     mr = ConnectionManager.encode_forward_close(triad, conn.connection_path, [])
     dispatch_request(state, from, mr, state.timeout, :forward_close)
+  end
+
+  @impl true
+  def handle_call(:host, _from, state) do
+    {:reply, {:ok, state.host}, state}
+  end
+
+  def handle_call({:io_forward_open, params, udp_port}, from, state) do
+    {fo, state} = build_io_forward_open(state, params)
+    mr = ConnectionManager.encode_forward_open(fo, :standard)
+    extra_cpf = [{:sockaddr_t2o, %{ip: {0, 0, 0, 0}, port: udp_port}}]
+    dispatch_request(state, from, {:ucmm, mr, extra_cpf}, state.timeout, {:io_reply, fo})
+  end
+
+  def handle_call({:io_forward_close, {serial, vendor, orig_serial}, path}, from, state) do
+    triad = %{
+      connection_serial: serial,
+      originator_vendor_id: vendor,
+      originator_serial: orig_serial
+    }
+
+    mr = ConnectionManager.encode_forward_close(triad, path, [])
+    dispatch_request(state, from, mr, state.timeout, :io_close)
   end
 
   @impl true
@@ -502,8 +578,12 @@ defmodule Eipex.Scanner do
   end
 
   defp send_request(state, from, mr, timeout, kind) when is_binary(mr) do
+    send_request(state, from, {:ucmm, mr, []}, timeout, kind)
+  end
+
+  defp send_request(state, from, {:ucmm, mr, extra_cpf}, timeout, kind) do
     context = <<state.context_counter::64-little>>
-    cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
+    cpf = CPF.encode([:null_address, {:unconnected_data, mr}] ++ extra_cpf)
 
     frame = %Encap{
       Encap.send_rr_data(state.session_handle, cpf)
@@ -581,14 +661,19 @@ defmodule Eipex.Scanner do
 
   defp handle_frame(state, %Encap{}), do: {:ok, state}
 
-  defp settle_reply(:request, reply, from, state) do
-    GenServer.reply(from, reply)
+  defp settle_reply(:request, {:ok, response, _sockaddrs}, from, state) do
+    GenServer.reply(from, {:ok, response})
+    next_request(state)
+  end
+
+  defp settle_reply(:request, {:error, _} = error, from, state) do
+    GenServer.reply(from, error)
     next_request(state)
   end
 
   defp settle_reply({:forward_open, meta}, reply, from, state) do
     case reply do
-      {:ok, %{status_name: :success, data: data}} ->
+      {:ok, %{status_name: :success, data: data}, _sockaddrs} ->
         case ConnectionManager.decode_forward_open_reply(data) do
           {:ok, fo_reply} ->
             conn = %{
@@ -609,7 +694,7 @@ defmodule Eipex.Scanner do
             next_request(state)
         end
 
-      {:ok, %{status_name: _name, extended: _extended}} when meta.fallback ->
+      {:ok, %{status_name: _name, extended: _extended}, _sockaddrs} when meta.fallback ->
         {fo, state} = build_forward_open(state, :standard)
         mr = ConnectionManager.encode_forward_open(fo, :standard)
         meta = %{fo: fo, variant: :standard, fallback: false}
@@ -618,7 +703,7 @@ defmodule Eipex.Scanner do
         # verbatim (on :lost it already replied {:error, :connection_lost} to from)
         send_request(state, from, mr, state.timeout, {:forward_open, meta})
 
-      {:ok, %{status_name: name, extended: extended}} ->
+      {:ok, %{status_name: name, extended: extended}, _sockaddrs} ->
         GenServer.reply(from, {:error, {:cip, name, extended}})
         next_request(state)
 
@@ -630,18 +715,56 @@ defmodule Eipex.Scanner do
 
   defp settle_reply(:forward_close, reply, from, state) do
     case reply do
-      {:ok, %{status_name: :success}} ->
+      {:ok, %{status_name: :success}, _sockaddrs} ->
         GenServer.reply(from, :ok)
         next_request(%{state | connection: nil})
 
       # the target has already timed out/dropped this connection: treat the
       # close as having succeeded rather than wedging the scanner permanently
       # in :already_connected (real targets idle-timeout class 3 connections)
-      {:ok, %{status_name: _name, extended: [0x0107]}} ->
+      {:ok, %{status_name: _name, extended: [0x0107]}, _sockaddrs} ->
         GenServer.reply(from, :ok)
         next_request(%{state | connection: nil})
 
-      {:ok, %{status_name: name, extended: extended}} ->
+      {:ok, %{status_name: name, extended: extended}, _sockaddrs} ->
+        GenServer.reply(from, {:error, {:cip, name, extended}})
+        next_request(state)
+
+      {:error, _} = error ->
+        GenServer.reply(from, error)
+        next_request(state)
+    end
+  end
+
+  defp settle_reply({:io_reply, fo}, reply, from, state) do
+    case reply do
+      {:ok, %{status_name: :success} = response, sockaddrs} ->
+        GenServer.reply(from, {:ok, fo, response, sockaddrs})
+        next_request(state)
+
+      {:ok, %{status_name: name, extended: extended}, _sockaddrs} ->
+        GenServer.reply(from, {:error, {:cip, name, extended}})
+        next_request(state)
+
+      {:error, _} = error ->
+        GenServer.reply(from, error)
+        next_request(state)
+    end
+  end
+
+  defp settle_reply(:io_close, reply, from, state) do
+    case reply do
+      {:ok, %{status_name: :success}, _sockaddrs} ->
+        GenServer.reply(from, :ok)
+        next_request(state)
+
+      # mirrors :forward_close's 0x0107 treatment: an already-dropped
+      # connection on the target counts as a successful close here too
+      {:ok, %{status_name: _name, extended: [0x0107]}, _sockaddrs} ->
+        GenServer.reply(from, :ok)
+        next_request(state)
+
+      {:ok, %{status_name: name, extended: extended}, _sockaddrs} ->
         GenServer.reply(from, {:error, {:cip, name, extended}})
         next_request(state)
 
@@ -656,7 +779,8 @@ defmodule Eipex.Scanner do
          {:ok, items} <- CPF.decode(cpf),
          [mr | _] <- for({:unconnected_data, d} <- items, do: d),
          {:ok, response} <- MessageRouter.decode_response(mr) do
-      {:ok, response}
+      sockaddrs = for {tag, _sa} = item <- items, tag in [:sockaddr_o2t, :sockaddr_t2o], do: item
+      {:ok, response, sockaddrs}
     else
       [] -> {:error, :no_data_item}
       {:error, reason} -> {:error, reason}
@@ -714,6 +838,40 @@ defmodule Eipex.Scanner do
       priority: :low,
       size_type: :variable,
       size: 500
+    }
+
+  # -- Class 1 (cyclic implicit I/O) Forward Open --------------------------------
+
+  defp build_io_forward_open(state, params) do
+    serial = state.connection_serial_counter
+
+    fo = %ConnectionManager.ForwardOpen{
+      priority_time_tick: 0x0A,
+      timeout_ticks: 10,
+      o2t_connection_id: 0,
+      t2o_connection_id: Bitwise.band(:erlang.unique_integer([:positive]), 0xFFFF_FFFF),
+      connection_serial: serial,
+      originator_vendor_id: state.vendor_id,
+      originator_serial: state.serial_number,
+      timeout_multiplier: params.timeout_multiplier,
+      o2t_rpi: params.o2t_rpi,
+      o2t_params: io_connection_params(params.o2t_size),
+      t2o_rpi: params.t2o_rpi,
+      t2o_params: io_connection_params(params.t2o_size),
+      transport: %{direction: :server, trigger: :cyclic, class: 1},
+      connection_path: Path.encode(params.path_segments)
+    }
+
+    {fo, %{state | connection_serial_counter: serial + 1}}
+  end
+
+  defp io_connection_params(size),
+    do: %{
+      owner: :exclusive,
+      type: :point_to_point,
+      priority: :low,
+      size_type: :fixed,
+      size: size
     }
 
   # -- Keepalive and loss handling ------------------------------------------------
