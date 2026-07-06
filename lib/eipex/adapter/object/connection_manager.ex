@@ -143,6 +143,7 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
          :ok <-
            validate_io_size(fo.o2t_params.size, out_size, ctx.config.io.o2t_run_idle, 0x0127),
          :ok <- validate_io_size(fo.t2o_params.size, in_size, ctx.config.io.t2o_run_idle, 0x0128),
+         :ok <- validate_no_conflict(ctx, o2t_asm),
          {:ok, peer} <- resolve_peer(ctx) do
       start_io_connection(fo, ctx, o2t_asm, t2o_asm, peer)
     else
@@ -150,6 +151,14 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
       # already yields a complete {:error, status, extended} tuple
       :error -> {:error, 0x01, [0x0110]}
       {:error, _status, _extended} = error -> error
+    end
+  end
+
+  defp validate_no_conflict(ctx, o2t_asm) do
+    if Eipex.Adapter.ConnectionTable.io_owns_assembly?(ctx.connections, o2t_asm) do
+      {:error, 0x01, [0x0106]}
+    else
+      :ok
     end
   end
 
@@ -238,7 +247,12 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
     {:ok, statem} =
       DynamicSupervisor.start_child(ctx.config.io.sup, {Eipex.Adapter.IoConnection, args})
 
-    info = %{t2o_connection_id: fo.t2o_connection_id, kind: :io, pid: statem}
+    info = %{
+      t2o_connection_id: fo.t2o_connection_id,
+      kind: :io,
+      pid: statem,
+      o2t_assembly: o2t_asm
+    }
 
     # The monitored OWNER of a class 1 connection is the statem itself, NOT the
     # TCP session (class 1 connections survive session close per spec; they die

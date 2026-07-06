@@ -1,11 +1,16 @@
 defmodule Eipex.Adapter.ConnectionTable do
   @moduledoc """
-  Registry of class 3 connections: triad -> connection info, with capacity
-  enforcement and automatic cleanup when the owning TCP session dies
-  (monitor-based). One per adapter.
+  Registry of adapter-side connections: triad -> connection info, with
+  capacity enforcement and automatic cleanup when the owning process dies
+  (monitor-based). Holds both class 3 explicit connections (owned by their
+  TCP session) and class 1 implicit I/O connections (`kind: :io`, owned by
+  their `Eipex.Adapter.IoConnection` statem). One per adapter.
   """
 
   use GenServer
+
+  @max_random_attempts 10
+  @max_o2t_id 0xFFFF_FFFF
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
@@ -18,10 +23,18 @@ defmodule Eipex.Adapter.ConnectionTable do
 
   def count(table), do: GenServer.call(table, :count)
 
+  @doc """
+  Whether an `:io` (class 1) record already consumes the given o2t
+  (originator-to-target) assembly instance. Used to enforce the
+  exclusive-owner rule: only one connection may consume a given assembly.
+  """
+  @spec io_owns_assembly?(GenServer.server(), non_neg_integer()) :: boolean()
+  def io_owns_assembly?(table, o2t_assembly),
+    do: GenServer.call(table, {:io_owns_assembly?, o2t_assembly})
+
   @impl true
   def init(opts) do
-    {:ok,
-     %{max: Keyword.fetch!(opts, :max), by_triad: %{}, by_o2t: %{}, monitors: %{}, next_id: 1}}
+    {:ok, %{max: Keyword.fetch!(opts, :max), by_triad: %{}, by_o2t: %{}, monitors: %{}}}
   end
 
   @impl true
@@ -34,7 +47,7 @@ defmodule Eipex.Adapter.ConnectionTable do
         {:reply, {:error, :capacity}, state}
 
       true ->
-        o2t_id = state.next_id
+        o2t_id = generate_o2t_id(state.by_o2t)
         info_with_kind = Map.put_new(info, :kind, :explicit)
         record = Map.merge(info_with_kind, %{triad: triad, session: session_pid, o2t_id: o2t_id})
 
@@ -58,8 +71,7 @@ defmodule Eipex.Adapter.ConnectionTable do
            state
            | by_triad: Map.put(state.by_triad, triad, record),
              by_o2t: Map.put(state.by_o2t, o2t_id, record),
-             monitors: monitors,
-             next_id: state.next_id + 1
+             monitors: monitors
          }}
     end
   end
@@ -84,6 +96,15 @@ defmodule Eipex.Adapter.ConnectionTable do
 
   def handle_call(:count, _from, state), do: {:reply, map_size(state.by_triad), state}
 
+  def handle_call({:io_owns_assembly?, o2t_assembly}, _from, state) do
+    owned? =
+      state.by_o2t
+      |> Map.values()
+      |> Enum.any?(&(&1[:kind] == :io and &1[:o2t_assembly] == o2t_assembly))
+
+    {:reply, owned?, state}
+  end
+
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     {dead, by_triad} =
@@ -103,4 +124,27 @@ defmodule Eipex.Adapter.ConnectionTable do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # -- o2t id generation ---------------------------------------------------------
+
+  # Random 32-bit nonzero connection ids (spec doesn't mandate sequential
+  # ids, and predictable ones are easy to guess/collide across sessions).
+  # `:rand.uniform/1` already excludes 0, so a handful of random attempts
+  # cover the common case; a linear probe guarantees termination once the
+  # table is nearly full (by_o2t is always smaller than `max`, so this
+  # converges quickly in practice).
+  defp generate_o2t_id(by_o2t) do
+    Enum.find_value(1..@max_random_attempts, fn _ ->
+      candidate = :rand.uniform(@max_o2t_id)
+      if Map.has_key?(by_o2t, candidate), do: nil, else: candidate
+    end) || linear_probe(by_o2t, 1)
+  end
+
+  defp linear_probe(by_o2t, candidate) do
+    if Map.has_key?(by_o2t, candidate) do
+      linear_probe(by_o2t, candidate + 1)
+    else
+      candidate
+    end
+  end
 end

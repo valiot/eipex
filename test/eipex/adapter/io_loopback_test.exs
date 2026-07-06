@@ -420,6 +420,14 @@ defmodule Eipex.Adapter.IoLoopbackTest do
     assert conn_id == fo.t2o_connection_id
   end
 
+  test "exclusive-owner conflict: a second FO to the same o2t assembly is refused", ctx do
+    {_fo, response, _fo_reply, _sockaddrs} = io_forward_open(ctx)
+    assert response.status_name == :success
+
+    {_fo2, response2, _fo_reply2, _sa2} = io_forward_open(ctx, serial: 2)
+    assert response2.extended == [0x0106]
+  end
+
   defp assert_eventually_produces(expected, tries \\ 20) do
     assert tries > 0, "never produced #{inspect(expected)}"
 
@@ -525,7 +533,12 @@ defmodule Eipex.Adapter.IoLoopbackTest do
 
       assert {:ok, io} = open_scanner_io(scanner)
 
-      assert {:error, {:cip, :connection_failure, [0x0113]}} = open_scanner_io(scanner)
+      # a different o2t assembly than `io`'s, so this probes capacity
+      # (0x0113) rather than tripping the exclusive-owner conflict (0x0106)
+      assert {:error, {:cip, :connection_failure, [0x0113]}} =
+               open_scanner_io(scanner,
+                 o_to_t: [assembly: 152, size: 4, rpi: 20_000, run_idle: true]
+               )
 
       Scanner.IOConnection.close(io)
       Scanner.close(scanner)
@@ -535,7 +548,11 @@ defmodule Eipex.Adapter.IoLoopbackTest do
       {_adapter, scanner} = start_scanner_pair(max_connections: 1)
 
       assert {:ok, io} = open_scanner_io(scanner)
-      assert {:error, {:cip, :connection_failure, [0x0113]}} = open_scanner_io(scanner)
+
+      assert {:error, {:cip, :connection_failure, [0x0113]}} =
+               open_scanner_io(scanner,
+                 o_to_t: [assembly: 152, size: 4, rpi: 20_000, run_idle: true]
+               )
 
       assert :ok = Scanner.IOConnection.close(io)
 
@@ -556,6 +573,10 @@ defmodule Eipex.Adapter.IoLoopbackTest do
           assemblies: [
             input: [instance: 100, size: 4],
             output: [instance: 150, size: 4],
+            # a second, distinct consuming assembly so capacity tests can
+            # probe capacity (0x0113) without tripping the exclusive-owner
+            # conflict check (0x0106) on the same o2t assembly
+            output: [instance: 152, size: 4],
             config: [instance: 151, size: 2]
           ],
           port: 0,

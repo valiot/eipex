@@ -91,4 +91,32 @@ defmodule Eipex.Adapter.ConnectionTableTest do
 
     assert {:ok, %{kind: :explicit}} = ConnectionTable.lookup_o2t(table, o2t)
   end
+
+  test "o2t ids are random, unique and nonzero" do
+    {:ok, table} = ConnectionTable.start_link(max: 8)
+
+    {:ok, o2t1} = ConnectionTable.register(table, {1, 1, 1}, %{t2o_connection_id: 1}, self())
+    {:ok, o2t2} = ConnectionTable.register(table, {2, 1, 1}, %{t2o_connection_id: 2}, self())
+
+    assert o2t1 != 0
+    assert o2t2 != 0
+    assert o2t1 != o2t2
+  end
+
+  test "io_owns_assembly? reflects registered io records" do
+    {:ok, table} = ConnectionTable.start_link(max: 8)
+
+    refute ConnectionTable.io_owns_assembly?(table, 150)
+
+    {:ok, _o2t} =
+      ConnectionTable.register(
+        table,
+        {1, 1, 1},
+        %{t2o_connection_id: 1, kind: :io, pid: self(), o2t_assembly: 150},
+        self()
+      )
+
+    assert ConnectionTable.io_owns_assembly?(table, 150)
+    refute ConnectionTable.io_owns_assembly?(table, 151)
+  end
 end
