@@ -20,7 +20,8 @@ defmodule Eipex.AdapterTest do
             output: [instance: 150, size: 4],
             config: [instance: 151, size: 2]
           ],
-          port: 0
+          port: 0,
+          io_udp_port: 0
         ] ++ extra
       )
 

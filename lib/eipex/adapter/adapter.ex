@@ -38,6 +38,9 @@ defmodule Eipex.Adapter do
           {:ok, :inet.port_number()} | {:error, :not_running}
   def discovery_port(server), do: GenServer.call(server, :discovery_port)
 
+  @spec io_udp_port(GenServer.server()) :: {:ok, :inet.port_number()} | {:error, term()}
+  def io_udp_port(server), do: GenServer.call(server, :io_udp_port)
+
   @spec read_assembly(GenServer.server(), non_neg_integer()) ::
           {:ok, binary()} | {:error, term()}
   def read_assembly(server, instance), do: GenServer.call(server, {:read_assembly, instance})
@@ -70,7 +73,22 @@ defmodule Eipex.Adapter do
          {:ok, store} <- AssemblyStore.start_link(Keyword.get(opts, :assemblies, [])),
          {:ok, connections} <-
            Eipex.Adapter.ConnectionTable.start_link(max: Keyword.get(opts, :max_connections, 8)),
+         {:ok, io_udp} <-
+           Eipex.Adapter.UDP.start_link(%{
+             port: Keyword.get(opts, :io_udp_port, 2222),
+             connections: connections
+           }),
+         {:ok, io_sup} <- DynamicSupervisor.start_link(strategy: :one_for_one),
          {:ok, sessions_sup} <- DynamicSupervisor.start_link(strategy: :one_for_one) do
+      io_opts = Keyword.get(opts, :io, [])
+
+      io = %{
+        udp: io_udp,
+        sup: io_sup,
+        o2t_run_idle: Keyword.get(io_opts, :o2t_run_idle, true),
+        t2o_run_idle: Keyword.get(io_opts, :t2o_run_idle, false)
+      }
+
       config = %Config{
         identity: identity,
         objects: Map.merge(@default_objects, Map.new(Keyword.get(opts, :objects, []))),
@@ -78,7 +96,8 @@ defmodule Eipex.Adapter do
         store: store,
         inactivity_timeout: Keyword.get(opts, :inactivity_timeout, 120_000),
         network: network,
-        connections: connections
+        connections: connections,
+        io: io
       }
 
       {:ok, listener} =
@@ -128,6 +147,10 @@ defmodule Eipex.Adapter do
       nil -> {:reply, {:error, :not_running}, state}
       pid -> {:reply, Eipex.Adapter.Discovery.port(pid), state}
     end
+  end
+
+  def handle_call(:io_udp_port, _from, state) do
+    {:reply, Eipex.Adapter.UDP.port(state.config.io.udp), state}
   end
 
   def handle_call({:read_assembly, instance}, _from, state) do

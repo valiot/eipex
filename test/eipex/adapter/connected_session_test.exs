@@ -18,7 +18,12 @@ defmodule Eipex.Adapter.ConnectedSessionTest do
   defp start_adapter(extra \\ []) do
     {:ok, pid} =
       Eipex.Adapter.start_link(
-        [identity: @identity, assemblies: [output: [instance: 150, size: 4]], port: 0] ++ extra
+        [
+          identity: @identity,
+          assemblies: [output: [instance: 150, size: 4]],
+          port: 0,
+          io_udp_port: 0
+        ] ++ extra
       )
 
     {:ok, port} = Eipex.Adapter.port(pid)

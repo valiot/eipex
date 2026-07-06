@@ -16,6 +16,7 @@ defmodule Eipex.Adapter.DiscoveryTest do
         identity: @identity,
         assemblies: [],
         port: 0,
+        io_udp_port: 0,
         discovery: discovery
       )
 

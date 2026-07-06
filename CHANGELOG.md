@@ -55,3 +55,4 @@
 - [Fixed] Connected reply cache purge on close; watchdog deviation documented; flags check
 - [Added] Implicit I/O helpers, handler I/O callbacks and connection-table I/O records
 - [Added] CPF extras threaded through adapter dispatch for I/O sockaddr exchange
+- [Added] Adapter shared I/O UDP socket with connection-id demux
