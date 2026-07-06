@@ -49,6 +49,11 @@ data, and sends output:
     mix test --include interop
     docker compose -f interop/docker-compose.yml down
 
+The same cpppo service also backs the Logix scanner interop (tag read,
+write and bulk Multiple Service Packet read):
+
+    mix test --include interop test/interop/cpppo_logix_test.exs
+
 The adapter side is exercised with pycomm3:
 
     mix test --include interop test/interop/pycomm3_test.exs

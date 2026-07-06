@@ -3,7 +3,7 @@ services:
     image: python:3.11-slim
     command: >
       sh -c "pip install --quiet cpppo &&
-             python -m cpppo.server.enip --address 0.0.0.0:44818 -v SCADA=INT[1000]"
+             python -m cpppo.server.enip --address 0.0.0.0:44818 -v SCADA=INT[1000] Rate=REAL[1] Flag=SINT[1]"
     ports:
       - "44818:44818"
 
