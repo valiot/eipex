@@ -200,8 +200,13 @@ defmodule Eipex.Scanner.IOConnection do
   defp notify(data, {tag, value}), do: send(data.owner, {:eipex_io, self(), tag, value})
   defp notify(data, tag), do: send(data.owner, {:eipex_io, self(), tag})
 
-  defp forward_close(data),
-    do: Eipex.Scanner.io_forward_close(data.scanner, data.triad, data.path)
+  defp forward_close(data) do
+    try do
+      Eipex.Scanner.io_forward_close(data.scanner, data.triad, data.path)
+    catch
+      :exit, _ -> :ok
+    end
+  end
 
   defp resolve_peer(sockaddrs, host) do
     case for {:sockaddr_o2t, sa} <- sockaddrs, do: sa do

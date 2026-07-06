@@ -107,6 +107,61 @@ defmodule Eipex.Scanner.IOConnectionTest do
     Scanner.close(scanner)
   end
 
+  test "close after the scanner has died stops the io connection cleanly" do
+    {_adapter, scanner} = start_pair()
+    {:ok, io} = open_io(scanner)
+    ref = Process.monitor(io)
+
+    # trap exits to prevent the scanner's death from crashing the test
+    old_trap = Process.flag(:trap_exit, true)
+
+    # kill the scanner out from under the io connection (simulates TCP loss teardown)
+    Process.exit(scanner, :kill)
+    Process.sleep(50)
+
+    # close/1 must not raise even though the forward close cannot be sent
+    assert :ok = Eipex.Scanner.IOConnection.close(io)
+    assert_receive {:DOWN, ^ref, :process, ^io, _reason}, 1_000
+
+    Process.flag(:trap_exit, old_trap)
+  end
+
+  test "watchdog timeout with a dead scanner still notifies the owner and stops" do
+    {adapter, scanner} = start_pair()
+
+    {:ok, io} =
+      Scanner.open_io(scanner,
+        o_to_t: [assembly: 150, size: 4, rpi: 20_000, run_idle: true],
+        t_to_o: [assembly: 100, size: 4, rpi: 20_000, run_idle: false],
+        config: [assembly: 151],
+        timeout_multiplier: 0,
+        owner: self()
+      )
+
+    ref = Process.monitor(io)
+
+    # trap exits to prevent the scanner's death from crashing the test
+    old_trap = Process.flag(:trap_exit, true)
+
+    # kill both scanner and adapter to stop data production
+    Process.exit(scanner, :kill)
+    Process.exit(adapter, :kill)
+
+    # drain exit messages
+    receive do
+      {:EXIT, _, :killed} -> :ok
+    after
+      100 -> :ok
+    end
+
+    # the T->O watchdog fires with no producer;
+    # the io connection must notify :timeout and stop normally, not crash
+    assert_receive {:eipex_io, ^io, :timeout}, 5_000
+    assert_receive {:DOWN, ^ref, :process, ^io, :normal}, 1_000
+
+    Process.flag(:trap_exit, old_trap)
+  end
+
   defp eventually(fun, tries \\ 50) do
     cond do
       fun.() -> true
