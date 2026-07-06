@@ -1,6 +1,6 @@
 defmodule Eipex.Scanner do
   @moduledoc """
-  EtherNet/IP scanner (originator) session for explicit messaging.
+  EtherNet/IP scanner (originator) session for explicit and implicit messaging.
 
   One process per target device: owns the TCP connection to port 44818,
   registers the encapsulation session, and serializes UCMM requests.
@@ -8,10 +8,15 @@ defmodule Eipex.Scanner do
   process exits `{:shutdown, :connection_lost}` and the owning
   application decides whether and when to retry.
 
-  Also supports connected (class 3) messaging: `forward_open/2` and
-  `forward_close/1` establish and tear down a single connection per
-  session, after which `generic_message/2` can be routed over it with
-  `connected: true`.
+  Supports three messaging classes:
+
+    * **Explicit messaging** (default): UCMM requests via `generic_message/2`,
+      attribute services via `get_attribute/4` and `set_attribute/5`, and
+      class 3 (connected) messaging via `forward_open/2` and `forward_close/1`.
+    * **Class 1 (cyclic implicit I/O)**: via `open_io/2`, which starts an
+      `Eipex.Scanner.IOConnection` process that exchanges cyclic data with
+      the target over UDP and notifies the owner of data changes, run/idle
+      transitions, and timeouts.
   """
 
   use GenServer
@@ -112,8 +117,46 @@ defmodule Eipex.Scanner do
 
   Starts (and links) an `Eipex.Scanner.IOConnection`, which owns its own UDP
   socket and blocks in its `init/1` for the Forward Open transaction before
-  returning. See `Eipex.Scanner.IOConnection` for the options and the
-  notifications sent to `:owner`.
+  returning.
+
+  ## Options
+
+    * `:o_to_t` — originator-to-target assembly config (required). A keyword
+      list with at least `:assembly` (instance number) and `:rpi` (rate of
+      issuance in microseconds); optionally `:size` (defaults to assembly's
+      data size), `:run_idle` (boolean, defaults to false).
+    * `:t_to_o` — target-to-originator assembly config (required). Same
+      structure as `:o_to_t`.
+    * `:config` — optional configuration assembly instance, as a keyword list
+      with `:assembly` key.
+    * `:timeout_multiplier` — optional integer watchdog multiplier (defaults
+      to 2; see `Eipex.Scanner.IOConnection`).
+    * `:owner` — required, a PID or registered name that receives I/O
+      notifications.
+
+  ## Owner notifications
+
+  The owner process receives the following messages:
+
+    * `{:eipex_io, pid, :data, binary}` — on the first packet and whenever
+      the payload changes (identical consecutive payloads are not repeated).
+    * `{:eipex_io, pid, :run_idle, :run | :idle}` — on a run/idle transition
+      (only if `:run_idle` was true for that assembly).
+    * `{:eipex_io, pid, :timeout}` — the watchdog expired; the connection is
+      best-effort closed on the target and the process stops.
+    * `{:eipex_io, pid, :closed}` — `Eipex.Scanner.IOConnection.close/1` was
+      called.
+
+  ## Connection scope
+
+  Implicit I/O connections are point-to-point and exclusive-owner; only one
+  scanner can open to a given target assembly pair at a time.
+
+  To set output data, call `Eipex.Scanner.IOConnection.set_output/2` with the
+  returned pid. To close the connection and stop the process, call
+  `Eipex.Scanner.IOConnection.close/1`.
+
+  ## Error handling
 
   On a Forward Open rejection the statem's `init/1` stops with `{:stop,
   reason}`; since `start_link` links the calling process, trapping exits for

@@ -61,3 +61,4 @@
 - [Fixed] Scanner I/O forward close tolerates a dead scanner (best-effort close)
 - [Added] Cross-role implicit I/O loopback matrix
 - [Added] OpENer interop harness for class 1 I/O
+- [Added] Implicit I/O documentation and usage examples

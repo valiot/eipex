@@ -1,11 +1,17 @@
 defmodule Eipex.Adapter do
   @moduledoc """
-  EtherNet/IP adapter (target) for explicit messaging.
+  EtherNet/IP adapter (target) for explicit and implicit messaging.
 
   One process tree per adapter: this GenServer owns (links) the assembly
-  store, the session-handler supervisor and the TCP listener. If any of
-  them dies the whole adapter dies and the owning application's supervisor
-  decides — mirroring the scanner's no-magic-recovery contract.
+  store, the session-handler supervisor, the TCP listener, and the UDP I/O
+  socket. If any of them dies the whole adapter dies and the owning
+  application's supervisor decides — mirroring the scanner's no-magic-recovery
+  contract.
+
+  Supports class 1 (cyclic implicit I/O) via `io_udp_port/1` and the
+  assembly-based connection handling in the session layer. Forward Open and
+  Forward Close transactions for I/O are processed alongside explicit
+  messaging.
   """
 
   use GenServer
@@ -38,6 +44,13 @@ defmodule Eipex.Adapter do
           {:ok, :inet.port_number()} | {:error, :not_running}
   def discovery_port(server), do: GenServer.call(server, :discovery_port)
 
+  @doc """
+  Returns the UDP port used for class 1 (cyclic implicit I/O) packet delivery.
+
+  Resolvers reported by the target's Forward Open reply use `{0, 0, 0, 0}` as
+  the adapter's IP address; the actual peer address is resolved to the
+  target's connected IP and this port by the I/O connection process.
+  """
   @spec io_udp_port(GenServer.server()) :: {:ok, :inet.port_number()} | {:error, term()}
   def io_udp_port(server), do: GenServer.call(server, :io_udp_port)
 
