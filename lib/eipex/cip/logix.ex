@@ -65,8 +65,8 @@ defmodule Eipex.CIP.Logix do
 
   # -- Multiple Service Packet -------------------------------------------------
 
-  @spec encode_multiple_service([binary()]) :: binary()
-  def encode_multiple_service(requests) do
+  @spec multiple_service_data([binary()]) :: binary()
+  def multiple_service_data(requests) do
     count = length(requests)
     first_offset = 2 + count * 2
 
@@ -75,11 +75,13 @@ defmodule Eipex.CIP.Logix do
         {<<offset::16-little>>, offset + byte_size(req)}
       end)
 
-    data =
-      <<count::16-little, IO.iodata_to_binary(offsets)::binary,
-        IO.iodata_to_binary(requests)::binary>>
+    <<count::16-little, IO.iodata_to_binary(offsets)::binary,
+      IO.iodata_to_binary(requests)::binary>>
+  end
 
-    MessageRouter.encode_request(0x0A, @message_router_path, data)
+  @spec encode_multiple_service([binary()]) :: binary()
+  def encode_multiple_service(requests) do
+    MessageRouter.encode_request(0x0A, @message_router_path, multiple_service_data(requests))
   end
 
   @spec decode_multiple_service_reply(binary()) ::

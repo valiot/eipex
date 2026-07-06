@@ -28,6 +28,7 @@
 - [Fixed] Discovery closes the UDP socket when the initial send fails
 - [Added] cpppo interop harness (docker compose + tagged interop tests)
 - [Added] CI workflow (format check + tests) on X64 runner
+- [Added] Expose Multiple Service Packet data body for scanner-side batching
 - [Fixed] Scanner send failures stop the session with connection_lost instead of crashing
 - [Fixed] Hermetic discovery leak test without DNS; test timing hardening
 - [Added] Unconnected Send decode and unknown-command encapsulation replies

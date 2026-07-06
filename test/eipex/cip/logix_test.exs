@@ -155,4 +155,18 @@ defmodule Eipex.CIP.LogixTest do
              <<0x53, 0x06, 0x91, 0x0A, "CartonSize", 0xC4, 0x00, 0x01, 0x00, 8::32-little, 0x0E,
                0x00, 0x00, 0x00>>
   end
+
+  test "multiple_service_data exposes the packet body used by encode_multiple_service" do
+    r1 = Logix.encode_read_tag(symbolic: "AB")
+    r2 = Logix.encode_read_tag(symbolic: "CDEF")
+
+    data = Logix.multiple_service_data([r1, r2])
+
+    assert data ==
+             <<2::16-little, 6::16-little, 6 + byte_size(r1)::16-little, r1::binary, r2::binary>>
+
+    # encode_multiple_service is exactly this body wrapped in the MR request
+    assert Logix.encode_multiple_service([r1, r2]) ==
+             Eipex.CIP.MessageRouter.encode_request(0x0A, [class: 0x02, instance: 1], data)
+  end
 end
