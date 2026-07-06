@@ -73,3 +73,4 @@
 - [Added] Scanner Logix read: typed values, bulk Multiple Service Packet, auto fragmentation
 - [Fixed] Bulk read accounts for MSP framing overhead and falls back when a batch is refused
 - [Added] Scanner Logix write with type inference from catalog or value
+- [Fixed] Logix write validates explicit types, catalog structs, and out-of-range float inference

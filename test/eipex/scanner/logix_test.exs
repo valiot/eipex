@@ -425,4 +425,31 @@ defmodule Eipex.Scanner.LogixTest do
 
     Scanner.close(plc)
   end
+
+  test "explicit unsupported type returns an error, not a crash" do
+    {plc, _target} = start_plc_with_target(write_spec())
+
+    assert {:error, :unsupported_type} =
+             Logix.write(plc, "Counter", [1, 2, 3], type: {:array, :dint, 1})
+
+    Scanner.close(plc)
+  end
+
+  test "catalog struct tag write reports struct_write_unsupported (same as no-catalog)" do
+    plc = start_plc(catalog_spec())
+    {:ok, catalog} = Logix.tag_list(plc)
+
+    assert {:error, :struct_write_unsupported} =
+             Logix.write(plc, "Motor", %{"running" => true}, tags: catalog)
+
+    Scanner.close(plc)
+  end
+
+  test "out-of-range float inference errors instead of writing infinity" do
+    {plc, _target} = start_plc_with_target(read_spec())
+
+    assert {:error, :unknown_type} = Logix.write(plc, "Rate", 3.5e38)
+
+    Scanner.close(plc)
+  end
 end

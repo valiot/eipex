@@ -604,6 +604,7 @@ defmodule Eipex.Scanner.Logix do
 
       catalog = opts[:tags] ->
         case Enum.find(catalog.tags, &(&1.name == name)) do
+          %Tag{type: {:struct, _} = type} -> {:ok, type}
           %Tag{type: type} when is_atom(type) -> {:ok, type}
           nil -> infer_write_type(value)
           _other -> {:error, :unknown_type}
@@ -626,7 +627,8 @@ defmodule Eipex.Scanner.Logix do
     end
   end
 
-  defp infer_write_type(value) when is_float(value), do: {:ok, :real}
+  defp infer_write_type(value) when is_float(value) and value >= -3.4e38 and value <= 3.4e38,
+    do: {:ok, :real}
 
   # Detect maps as struct attempts (will be rejected by Value.encode with proper error)
   defp infer_write_type(value) when is_map(value), do: {:ok, {:struct, 0}}

@@ -85,6 +85,8 @@ defmodule Eipex.Scanner.Logix.Value do
     end
   end
 
+  def encode(_value, _type, _templates), do: {:error, :unsupported_type}
+
   # -- Logix STRING decode ------------------------------------------------------
 
   defp decode_string(template, body) do
