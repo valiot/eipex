@@ -46,7 +46,10 @@ defmodule Eipex.CIP.Types do
   def encode(:uint, v) when v in 0..65_535, do: {:ok, <<v::16-little>>}
   def encode(:udint, v) when v in 0..4_294_967_295, do: {:ok, <<v::32-little>>}
   def encode(:ulint, v) when v in 0..18_446_744_073_709_551_615, do: {:ok, <<v::64-little>>}
-  def encode(:real, v) when is_number(v), do: {:ok, <<v::32-little-float>>}
+
+  def encode(:real, v) when is_number(v) and v >= -3.4e38 and v <= 3.4e38,
+    do: {:ok, <<v::32-little-float>>}
+
   def encode(:lreal, v) when is_number(v), do: {:ok, <<v::64-little-float>>}
   def encode(:byte, v) when v in 0..255, do: {:ok, <<v::8>>}
   def encode(:word, v) when v in 0..65_535, do: {:ok, <<v::16-little>>}

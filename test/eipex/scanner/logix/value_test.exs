@@ -150,4 +150,8 @@ defmodule Eipex.Scanner.Logix.ValueTest do
     assert {:error, :bad_value} = Value.encode(70_000, :int, %{})
     assert {:error, :struct_write_unsupported} = Value.encode(%{}, {:struct, 1}, %{})
   end
+
+  test "encode rejects an out-of-range :real instead of writing infinity" do
+    assert {:error, :bad_value} = Value.encode(3.5e39, :real, %{})
+  end
 end

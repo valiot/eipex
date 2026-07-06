@@ -40,7 +40,11 @@ defmodule Eipex.Scanner.Logix do
   ## Scope and Limitations
 
   - **Structure writes unsupported** — `write/4` rejects struct values with
-    `:struct_write_unsupported`. Atomics and arrays are supported.
+    `:struct_write_unsupported`. Only atomic *scalar* writes are supported;
+    `Value.encode/3` has no list/array encoding path, so a multi-element
+    array write is not yet implemented (deferred) — a catalog array tag
+    resolves to its base atomic type so a *single-element* write still
+    succeeds (see `resolve_write_type/3`).
   - **Deep nesting best-effort** — UDT members may contain nested structs up
     to two levels; beyond that, nesting is decoded best-effort using
     template offsets (documented in `Eipex.Scanner.Logix.Value`).
@@ -653,7 +657,10 @@ defmodule Eipex.Scanner.Logix do
   Encodes the value via `Value.encode/3` and sends a Write Tag request
   (service 0x4D). Returns `:ok` on success; on a CIP error, returns
   `{:error, {:cip, status_name, extended}}`; `:struct_write_unsupported` from
-  the encoder propagates as-is.
+  the encoder propagates as-is; a value that doesn't fit the resolved type
+  (wrong shape, or out of range — e.g. a `:real` magnitude beyond ±3.4e38)
+  returns `{:error, :bad_value}`. Only atomic scalar writes are supported —
+  a multi-element array write is not yet implemented (deferred).
   """
   @spec write(GenServer.server(), String.t(), term(), keyword()) ::
           :ok | {:error, term()}
@@ -687,6 +694,7 @@ defmodule Eipex.Scanner.Logix do
       catalog = opts[:tags] ->
         case Enum.find(catalog.tags, &(&1.name == name)) do
           %Tag{type: {:struct, _} = type} -> {:ok, type}
+          %Tag{type: {:array, base, _}} when is_atom(base) -> {:ok, base}
           %Tag{type: type} when is_atom(type) -> {:ok, type}
           nil -> infer_write_type(value)
           _other -> {:error, :unknown_type}

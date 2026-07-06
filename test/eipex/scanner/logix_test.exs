@@ -499,6 +499,29 @@ defmodule Eipex.Scanner.LogixTest do
     Scanner.close(plc)
   end
 
+  test "catalog array-typed tag resolves to its base atomic type for scalar writes" do
+    # A DINT[1] array symbol (dims=1, atomic_type dint): raw_type 0x00C4 with
+    # the dims bits (13-14) set to 1 -> 0x20C4.
+    spec = %{
+      symbols: [%{instance: 1, name: "Bucket", raw_type: 0x20C4}],
+      tags: %{"Bucket" => {:dint, 0}}
+    }
+
+    {plc, _target} = start_plc_with_target(spec)
+    {:ok, catalog} = Logix.tag_list(plc)
+
+    assert %{type: {:array, :dint, 1}} = Enum.find(catalog.tags, &(&1.name == "Bucket"))
+
+    # Writing a scalar element value works, matching no-catalog behavior
+    # (without a catalog, resolve_write_type would just infer :dint from the
+    # value and this write would already succeed).
+    assert :ok = Logix.write(plc, "Bucket", 42, tags: catalog)
+
+    assert {:ok, %Eipex.Tag{name: "Bucket", value: 42, error: nil}} = Logix.read(plc, "Bucket")
+
+    Scanner.close(plc)
+  end
+
   test "out-of-range float inference errors instead of writing infinity" do
     {plc, _target} = start_plc_with_target(read_spec())
 

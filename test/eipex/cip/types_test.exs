@@ -29,6 +29,15 @@ defmodule Eipex.CIP.TypesTest do
     assert {:error, :bad_value} = Types.encode(:sint, 40_000)
   end
 
+  test "real encode rejects magnitudes outside the 32-bit float range" do
+    assert {:ok, _bin} = Types.encode(:real, 3.4e38)
+    assert {:error, :bad_value} = Types.encode(:real, 3.5e39)
+    assert {:error, :bad_value} = Types.encode(:real, -3.5e39)
+
+    # lreal's range comfortably covers this magnitude, unaffected
+    assert {:ok, _bin} = Types.encode(:lreal, 3.5e39)
+  end
+
   test "decode_typed parses a Logix read reply payload" do
     assert {:ok, {:dint, 534}} = Types.decode_typed(<<0xC4, 0x00, 0x16, 0x02, 0x00, 0x00>>)
     # two-element array of INT

@@ -77,3 +77,4 @@
 - [Added] cpppo interop for Logix read/write/bulk
 - [Added] Scanner Logix documentation and usage example
 - [Fixed] tag_list guards malformed template attrs and non-advancing symbol lists
+- [Fixed] Logix write: array-catalog scalar writes, real range guard, corrected array-write docs

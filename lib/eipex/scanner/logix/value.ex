@@ -1,9 +1,13 @@
 defmodule Eipex.Scanner.Logix.Value do
   @moduledoc """
   Decodes Logix read replies into Elixir terms and encodes terms for writes,
-  using a UDT template registry (handle => template). Atomic values, arrays,
-  member-map structures and Logix STRING structs are supported; structure
-  writes are not (this phase).
+  using a UDT template registry (handle => template).
+
+  Decode (`decode_reply/2`) covers atomic values, arrays, member-map
+  structures and Logix STRING structs. Encode (`encode/3`) is narrower: only
+  atomic *scalar* values (and `:bool`) are supported for writes; struct
+  values are rejected with `:struct_write_unsupported`, and multi-element
+  array writes are not yet implemented (this phase).
 
   A template is `%{name, members, structure_size}` as produced by
   `Eipex.CIP.Logix.decode_template_definition/2` (registry adds
@@ -119,6 +123,11 @@ defmodule Eipex.Scanner.Logix.Value do
     end)
   end
 
+  # TODO(phase-7): verify BOOL-in-UDT bit source against pycomm3/hardware.
+  # `bool_position` comes from the member's *symbol type word*
+  # (`Types.decode_symbol_type/1`, bits 8-10) rather than the member's `info`
+  # field; 1756-PM020 is ambiguous on which one a bit-packed BOOL member
+  # inside a UDT actually uses, and this can't be settled by loopback alone.
   defp decode_member(
          %{symbol_type: %{atomic_type: :bool, bool_position: pos}} = member,
          _next,
