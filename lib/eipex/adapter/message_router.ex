@@ -68,6 +68,9 @@ defmodule Eipex.Adapter.MessageRouter do
             {:raw, response} ->
               {response, []}
 
+            {:raw, response, extra_cpf} ->
+              {response, extra_cpf}
+
             {:error, status, extended} ->
               {MR.encode_response(service, status, extended: extended), []}
           end

@@ -62,3 +62,4 @@
 - [Added] Cross-role implicit I/O loopback matrix
 - [Added] OpENer interop harness for class 1 I/O
 - [Added] Implicit I/O documentation and usage examples
+- [Fixed] Class 1 Forward Open via Unconnected Send resolves the real peer, not localhost

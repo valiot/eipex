@@ -171,6 +171,81 @@ defmodule Eipex.Adapter.IoLoopbackTest do
     {fo, response, fo_reply, sockaddrs}
   end
 
+  # Same class 1 Forward Open as `io_forward_open/2`, but wrapped in an
+  # Unconnected Send (service 0x52 to class 0x06 instance 1) — how a routed
+  # Rockwell/pycomm3 scanner actually sends a class 1 FO. The sockaddr_t2o
+  # item travels in the OUTER CPF (Unconnected Send has no CPF of its own);
+  # the adapter must thread it through the re-dispatch to the embedded FO.
+  defp io_forward_open_via_unconnected_send(ctx, overrides \\ []) do
+    o2t_size = Keyword.get(overrides, :o2t_size, 10)
+    t2o_size = Keyword.get(overrides, :t2o_size, 6)
+    rpi = Keyword.get(overrides, :rpi, 20_000)
+    serial = Keyword.get(overrides, :serial, 1)
+
+    path =
+      Path.encode([
+        {:class, 0x04},
+        {:instance, 151},
+        {:connection_point, 150},
+        {:connection_point, 100}
+      ])
+
+    fo = %CM.ForwardOpen{
+      priority_time_tick: 0x0A,
+      timeout_ticks: 10,
+      o2t_connection_id: 0,
+      t2o_connection_id: 0x5255_0000 + serial,
+      connection_serial: serial,
+      originator_vendor_id: 0x004D,
+      originator_serial: 0xDEAD_0002,
+      timeout_multiplier: Keyword.get(overrides, :multiplier, 1),
+      o2t_rpi: rpi,
+      o2t_params: %{
+        owner: :exclusive,
+        type: :point_to_point,
+        priority: :low,
+        size_type: :fixed,
+        size: o2t_size
+      },
+      t2o_rpi: rpi,
+      t2o_params: %{
+        owner: :exclusive,
+        type: :point_to_point,
+        priority: :low,
+        size_type: :fixed,
+        size: t2o_size
+      },
+      transport: %{direction: :server, trigger: :cyclic, class: 1},
+      connection_path: path
+    }
+
+    embedded = CM.encode_forward_open(fo, :standard)
+    unconnected_send = CM.encode_unconnected_send(embedded, [{:port, 1, 0}], [])
+
+    cpf =
+      CPF.encode([
+        :null_address,
+        {:unconnected_data, unconnected_send},
+        {:sockaddr_t2o, %{ip: {0, 0, 0, 0}, port: ctx.my_udp_port}}
+      ])
+
+    send_frame(ctx.socket, Encap.send_rr_data(ctx.handle, cpf))
+    reply = recv_frame(ctx.socket)
+    {:ok, rcpf} = Encap.unwrap_cpf(reply)
+    {:ok, items} = CPF.decode(rcpf)
+    [{:unconnected_data, mr}] = for {:unconnected_data, _} = i <- items, do: i
+    {:ok, response} = MR.decode_response(mr)
+    sockaddrs = for {:sockaddr_o2t, sa} <- items, do: sa
+
+    fo_reply =
+      if response.status_name == :success do
+        {:ok, reply} = CM.decode_forward_open_reply(response.data)
+        reply
+      end
+
+    {fo, response, fo_reply, sockaddrs}
+  end
+
   defp forward_close(ctx, fo) do
     triad = %{
       connection_serial: fo.connection_serial,
@@ -325,6 +400,24 @@ defmodule Eipex.Adapter.IoLoopbackTest do
 
     {_fo2, response2, _fo_reply2, _sa2} = io_forward_open(ctx, rpi: 100, serial: 2)
     assert response2.extended == [0x0111]
+  end
+
+  test "a class 1 forward open wrapped in unconnected send resolves the real peer", ctx do
+    {fo, response, fo_reply, sockaddrs} = io_forward_open_via_unconnected_send(ctx)
+
+    assert response.status_name == :success
+    assert fo_reply.t2o_connection_id == fo.t2o_connection_id
+
+    # the embedded FO's sockaddr_o2t reply item must propagate through the
+    # Unconnected Send re-dispatch to the outer encapsulation reply
+    assert [%{port: adapter_io_port}] = sockaddrs
+    assert adapter_io_port == ctx.io_port
+
+    # T->O production must land on the test's real UDP endpoint, not on a
+    # localhost:2222 fallback caused by a dropped peer_ip/cpf_items
+    assert_receive {:udp, _, _, _, datagram}, 1_000
+    assert {:ok, %{conn_id: conn_id}} = Eipex.IO.decode_packet(datagram, false)
+    assert conn_id == fo.t2o_connection_id
   end
 
   defp assert_eventually_produces(expected, tries \\ 20) do

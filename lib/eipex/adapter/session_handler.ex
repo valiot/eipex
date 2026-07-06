@@ -200,7 +200,14 @@ defmodule Eipex.Adapter.SessionHandler do
             state
 
           _ ->
-            response = MessageRouter.dispatch(state.config, mr)
+            # peer_ip lets a connected-channel Forward Open (re-dispatched via
+            # Unconnected Send over a class 3 connection) resolve a real T->O
+            # peer; connected requests carry no CPF sockaddr of their own, and
+            # SendUnitData replies don't carry extra CPF items back in this
+            # phase, so the extra_cpf half of the tuple is intentionally
+            # dropped here.
+            {response, _extra_cpf} =
+              MessageRouter.dispatch(state.config, mr, %{peer_ip: state.peer_ip})
 
             reply_frame = %Encap{
               Encap.send_unit_data(

@@ -33,7 +33,9 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
   def handle_service(@unconnected_send, 1, [], data, ctx) do
     case CM.decode_unconnected_send(data) do
       {:ok, %{embedded: embedded}} ->
-        {:raw, Eipex.Adapter.MessageRouter.dispatch(ctx.config, embedded)}
+        extras = Map.take(ctx, [:cpf_items, :peer_ip])
+        {response, extra_cpf} = Eipex.Adapter.MessageRouter.dispatch(ctx.config, embedded, extras)
+        {:raw, response, extra_cpf}
 
       {:error, _} ->
         {:error, 0x13, []}
@@ -140,8 +142,14 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
          :ok <- validate_config_instance(ctx, cfg),
          :ok <-
            validate_io_size(fo.o2t_params.size, out_size, ctx.config.io.o2t_run_idle, 0x0127),
-         :ok <- validate_io_size(fo.t2o_params.size, in_size, ctx.config.io.t2o_run_idle, 0x0128) do
-      start_io_connection(fo, ctx, o2t_asm, t2o_asm)
+         :ok <- validate_io_size(fo.t2o_params.size, in_size, ctx.config.io.t2o_run_idle, 0x0128),
+         {:ok, peer} <- resolve_peer(ctx) do
+      start_io_connection(fo, ctx, o2t_asm, t2o_asm, peer)
+    else
+      # only resolve_peer returns a bare :error; every other step above
+      # already yields a complete {:error, status, extended} tuple
+      :error -> {:error, 0x01, [0x0110]}
+      {:error, _status, _extended} = error -> error
     end
   end
 
@@ -208,9 +216,8 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
     end
   end
 
-  defp start_io_connection(fo, ctx, o2t_asm, t2o_asm) do
+  defp start_io_connection(fo, ctx, o2t_asm, t2o_asm, peer) do
     triad = {fo.connection_serial, fo.originator_vendor_id, fo.originator_serial}
-    peer = resolve_peer(ctx)
 
     args = %{
       table: ctx.connections,
@@ -266,11 +273,30 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
 
   defp overhead(run_idle?), do: 2 + if(run_idle?, do: 4, else: 0)
 
+  # Resolves the concrete peer for T->O production. `{0, 0, 0, 0}` in the
+  # originator's sockaddr_t2o item means "use the address you saw this
+  # request come from" — which requires `ctx.peer_ip`. When neither a
+  # concrete sockaddr_t2o ip nor `ctx.peer_ip` is available there is no way
+  # to determine a real peer; callers must treat `:error` as a backstop
+  # (CIP 0x01/0x0110, target not configured) rather than default to
+  # localhost.
+  @spec resolve_peer(map()) :: {:ok, {:inet.ip4_address(), :inet.port_number()}} | :error
   defp resolve_peer(ctx) do
     case for {:sockaddr_t2o, sa} <- Map.get(ctx, :cpf_items, []), do: sa do
-      [%{ip: {0, 0, 0, 0}, port: port} | _] -> {Map.get(ctx, :peer_ip, {127, 0, 0, 1}), port}
-      [%{ip: ip, port: port} | _] -> {ip, port}
-      [] -> {Map.get(ctx, :peer_ip, {127, 0, 0, 1}), 2222}
+      [%{ip: {0, 0, 0, 0}, port: port} | _] ->
+        case Map.fetch(ctx, :peer_ip) do
+          {:ok, peer_ip} -> {:ok, {peer_ip, port}}
+          :error -> :error
+        end
+
+      [%{ip: ip, port: port} | _] ->
+        {:ok, {ip, port}}
+
+      [] ->
+        case Map.fetch(ctx, :peer_ip) do
+          {:ok, peer_ip} -> {:ok, {peer_ip, 2222}}
+          :error -> :error
+        end
     end
   end
 end
