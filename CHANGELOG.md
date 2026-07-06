@@ -68,3 +68,4 @@
 - [Fixed] Interop port hygiene, peername race, and I/O documentation
 - [Added] Logix value layer: struct/array/string decode and atomic write encode
 - [Fixed] Logix struct decode reads array members as element lists
+- [Added] Scanner Logix tag_list: Symbol Object discovery with UDT template fetch
