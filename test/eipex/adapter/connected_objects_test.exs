@@ -96,10 +96,10 @@ defmodule Eipex.Adapter.ConnectedObjectsTest do
     assert response.status_name == :success
   end
 
-  test "transport classes other than 3 answer 0x0103" do
+  test "transport classes other than 1 and 3 answer 0x0103" do
     cfg = config()
 
-    fo = forward_open(transport: %{direction: :server, trigger: :cyclic, class: 1})
+    fo = forward_open(transport: %{direction: :server, trigger: :cyclic, class: 5})
     response = dispatch(cfg, CM.encode_forward_open(fo, :standard))
 
     assert response.status_name == :connection_failure

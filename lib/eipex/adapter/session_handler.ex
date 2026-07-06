@@ -24,14 +24,16 @@ defmodule Eipex.Adapter.SessionHandler do
        session_handle: nil,
        timer: nil,
        closing: false,
-       conn_replies: %{}
+       conn_replies: %{},
+       peer_ip: nil
      }}
   end
 
   @impl true
   def handle_cast(:activate, state) do
     :ok = :inet.setopts(state.socket, active: :once)
-    {:noreply, arm_inactivity(state)}
+    {:ok, {peer_ip, _port}} = :inet.peername(state.socket)
+    {:noreply, arm_inactivity(%{state | peer_ip: peer_ip})}
   end
 
   @impl true
@@ -105,7 +107,10 @@ defmodule Eipex.Adapter.SessionHandler do
         case rr_payload(frame) do
           {:ok, mr_request, items} ->
             {response, extra_cpf} =
-              MessageRouter.dispatch(state.config, mr_request, %{cpf_items: items})
+              MessageRouter.dispatch(state.config, mr_request, %{
+                cpf_items: items,
+                peer_ip: state.peer_ip
+              })
 
             cpf =
               CPF.encode([:null_address, {:unconnected_data, response}] ++ extra_cpf)
