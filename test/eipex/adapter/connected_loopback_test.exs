@@ -83,8 +83,9 @@ defmodule Eipex.Adapter.ConnectedLoopbackTest do
 
     {:ok, _} = Scanner.forward_open(scanner1)
 
-    # same vendor/serial and both serial counters start at 1 -> same triad;
-    # the large attempt AND its standard fallback both collide
+    # same vendor/serial and both serial counters start at 1 -> same triad.
+    # (variant: :standard is forced: a :large attempt would fall back with a
+    # NEW serial and legitimately succeed as a distinct connection)
     assert {:error, {:cip, :connection_failure, [0x0100]}} =
              Scanner.forward_open(scanner2, variant: :standard)
 
