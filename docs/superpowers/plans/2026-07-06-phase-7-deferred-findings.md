@@ -49,3 +49,14 @@ Carried forward from the whole-branch review of `phase-6-logix-services`
 ## Accepted (no action)
 
 (none newly accepted this review)
+
+## Added from the Phase 6 fix-wave re-review (low severity, polish)
+
+- **Dotted names with an empty part** (`"A..B"`, `"Tag."`) now return
+  `{:error, {:invalid_request, "no function clause..."}}` from the rescued
+  `Path.encode` empty-symbolic miss — a clean error tuple but an exception
+  string rather than a semantic reason. Give the tag-path parser an explicit
+  empty-part rejection with a named reason.
+- **Bracketed index ≥ 2^32** (`"Tag[4294967296]"`) truncates silently in the
+  32-bit member segment encode. Range-clamp/guard in the parser or encode.
+  Far beyond any real Logix dimension.
