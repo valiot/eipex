@@ -2,7 +2,8 @@ defmodule Eipex.Adapter.Object do
   @moduledoc """
   Behaviour for CIP object classes served by the adapter's Message Router.
 
-  Return `{:reply, data}` for a success response, `{:error, status, extended}`
+  Return `{:reply, data}` for a success response, `{:reply, data, extra_cpf}` to
+  append extra CPF items to the encapsulation reply, `{:error, status, extended}`
   for a CIP error, or `{:raw, response}` when the module already built the
   complete Message Router response (Unconnected Send replies with the
   embedded response verbatim).
@@ -15,5 +16,8 @@ defmodule Eipex.Adapter.Object do
               data :: binary(),
               ctx :: map()
             ) ::
-              {:reply, binary()} | {:raw, binary()} | {:error, byte(), [non_neg_integer()]}
+              {:reply, binary()}
+              | {:reply, binary(), [Eipex.CPF.item()]}
+              | {:raw, binary()}
+              | {:error, byte(), [non_neg_integer()]}
 end

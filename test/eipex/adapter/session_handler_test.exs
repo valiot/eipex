@@ -214,4 +214,29 @@ defmodule Eipex.Adapter.SessionHandlerTest do
     assert reply.status == 0x0069
     assert reply.data == <<1::16-little, 0::16-little>>
   end
+
+  defmodule SockaddrObject do
+    @behaviour Eipex.Adapter.Object
+
+    def handle_service(0x0E, 1, _path, _data, _ctx) do
+      {:reply, <<>>, [{:sockaddr_o2t, %{ip: {0, 0, 0, 0}, port: 2222}}]}
+    end
+  end
+
+  test "extra cpf items from objects ride the send_rr_data reply" do
+    {_pid, port} = start_adapter(objects: [{0x66, SockaddrObject}])
+    socket = connect(port)
+    handle = register(socket)
+
+    mr = Eipex.CIP.MessageRouter.encode_request(0x0E, class: 0x66, instance: 1)
+    cpf = CPF.encode([:null_address, {:unconnected_data, mr}])
+    send_frame(socket, Encap.send_rr_data(handle, cpf))
+
+    reply = recv_frame(socket)
+    {:ok, rcpf} = Encap.unwrap_cpf(reply)
+    {:ok, items} = CPF.decode(rcpf)
+
+    assert [{:sockaddr_o2t, %{port: 2222}}] =
+             for({:sockaddr_o2t, _} = i <- items, do: i)
+  end
 end

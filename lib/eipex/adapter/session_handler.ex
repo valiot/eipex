@@ -103,9 +103,12 @@ defmodule Eipex.Adapter.SessionHandler do
 
       true ->
         case rr_payload(frame) do
-          {:ok, mr_request} ->
-            response = MessageRouter.dispatch(state.config, mr_request)
-            cpf = CPF.encode([:null_address, {:unconnected_data, response}])
+          {:ok, mr_request, items} ->
+            {response, extra_cpf} =
+              MessageRouter.dispatch(state.config, mr_request, %{cpf_items: items})
+
+            cpf =
+              CPF.encode([:null_address, {:unconnected_data, response}] ++ extra_cpf)
 
             reply(state, %Encap{
               Encap.send_rr_data(state.session_handle, cpf)
@@ -164,7 +167,7 @@ defmodule Eipex.Adapter.SessionHandler do
     with {:ok, cpf} <- Encap.unwrap_cpf(frame),
          {:ok, items} <- CPF.decode(cpf),
          [mr | _] <- for({:unconnected_data, d} <- items, do: d) do
-      {:ok, mr}
+      {:ok, mr, items}
     else
       _ -> {:error, :malformed}
     end

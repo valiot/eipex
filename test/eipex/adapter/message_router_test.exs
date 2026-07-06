@@ -117,4 +117,41 @@ defmodule Eipex.Adapter.MessageRouterTest do
 
     assert log =~ "boom"
   end
+
+  defmodule ExtraCpfObject do
+    @behaviour Eipex.Adapter.Object
+
+    def handle_service(0x0E, 1, _path, _data, ctx) do
+      # echoes how many CPF items the session handed us, and returns a sockaddr
+      count = length(Map.get(ctx, :cpf_items, []))
+
+      {:reply, <<count>>, [{:sockaddr_o2t, %{ip: {127, 0, 0, 1}, port: 4321}}]}
+    end
+  end
+
+  test "dispatch/3 threads cpf items in and extra cpf items out" do
+    cfg = config()
+    cfg = %{cfg | objects: Map.put(cfg.objects, 0x65, ExtraCpfObject)}
+
+    request = MR.encode_request(0x0E, class: 0x65, instance: 1)
+
+    {response, extra} =
+      MessageRouter.dispatch(cfg, request, %{
+        cpf_items: [:null_address, {:unconnected_data, <<>>}]
+      })
+
+    assert {:ok, %{status_name: :success, data: <<2>>}} = MR.decode_response(response)
+    assert extra == [{:sockaddr_o2t, %{ip: {127, 0, 0, 1}, port: 4321}}]
+  end
+
+  test "dispatch/2 keeps the old binary contract" do
+    cfg = config()
+    cfg = %{cfg | objects: Map.put(cfg.objects, 0x65, ExtraCpfObject)}
+
+    request = MR.encode_request(0x0E, class: 0x65, instance: 1)
+    response = MessageRouter.dispatch(cfg, request)
+
+    assert is_binary(response)
+    assert {:ok, %{data: <<0>>}} = MR.decode_response(response)
+  end
 end
