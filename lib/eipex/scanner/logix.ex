@@ -134,6 +134,16 @@ defmodule Eipex.Scanner.Logix do
 
   # -- Symbol Object iteration (service 0x55) ----------------------------------
 
+  # The Symbol Object instance is always sent as a 16-bit logical segment
+  # (like pycomm3: iteration walks past 255 quickly and a stable path shape
+  # simplifies interop) — a controller reporting more than 65,536 tag
+  # instances is out of scope for this iteration. Reject rather than let the
+  # wire encoding below silently wrap/truncate into a bogus, already-seen
+  # instance.
+  defp fetch_symbols(_server, start_instance, _acc) when start_instance > 0xFFFF do
+    {:error, :malformed_symbol_list}
+  end
+
   defp fetch_symbols(server, start_instance, acc) do
     path = <<0x20, 0x6B, 0x25, 0x00, start_instance::16-little>>
     data = <<2::16-little, 1::16-little, 2::16-little>>
@@ -150,7 +160,17 @@ defmodule Eipex.Scanner.Logix do
 
             _ ->
               next_instance = List.last(symbols).instance + 1
-              fetch_symbols(server, next_instance, acc ++ symbols)
+
+              # A genuine continuation must report a last instance that
+              # advances the next request past this one's start — otherwise
+              # (a degenerate reply, or the >0xFFFF wraparound above landing
+              # back on already-seen instances) the loop would repeat the
+              # same query forever.
+              if next_instance > start_instance do
+                fetch_symbols(server, next_instance, acc ++ symbols)
+              else
+                {:error, :malformed_symbol_list}
+              end
           end
         end
 
@@ -231,13 +251,30 @@ defmodule Eipex.Scanner.Logix do
            data: data
          ) do
       {:ok, %{status_name: :success, data: reply}} ->
-        LogixCodec.decode_template_attributes(reply)
+        with {:ok, attrs} <- LogixCodec.decode_template_attributes(reply) do
+          validate_template_attrs(attrs)
+        end
 
       {:ok, %{status_name: name, extended: extended}} ->
         {:error, {:cip, name, extended}}
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  @required_template_attrs [:handle, :member_count, :definition_size, :structure_size]
+
+  # A device that covers fewer than the 4 requested attributes decodes to a
+  # partial map (Eipex.CIP.Logix.decode_template_attributes/1 stops at
+  # whatever count the reply carries) — every one of these keys is read
+  # unconditionally by fetch_template/2 below, so a missing key would
+  # otherwise surface as an uncaught KeyError instead of a reported error.
+  defp validate_template_attrs(attrs) do
+    if Enum.all?(@required_template_attrs, &Map.has_key?(attrs, &1)) do
+      {:ok, attrs}
+    else
+      {:error, :malformed_template}
     end
   end
 

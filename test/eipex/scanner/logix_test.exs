@@ -116,6 +116,27 @@ defmodule Eipex.Scanner.LogixTest do
     Scanner.close(plc)
   end
 
+  test "non-advancing partial-transfer symbol list errors, not an infinite loop" do
+    # Always answers with a single symbol at instance 0, status partial_transfer
+    # (0x06), no matter what start instance was requested — the second
+    # continuation (start=1) then carries a last instance (0) that doesn't
+    # advance past the requested start, which must not spin forever.
+    handler = fn mr ->
+      {:ok, %{service: service}} = Eipex.CIP.MessageRouter.decode_request(mr)
+      symbol = <<0::32-little, 3::16-little, "Tag", 0x00C4::16-little>>
+      Eipex.CIP.MessageRouter.encode_response(service, 0x06, data: symbol)
+    end
+
+    target = ScriptedTarget.start(handler)
+    {:ok, plc} = Scanner.start_link(host: {127, 0, 0, 1}, port: target.port)
+
+    # Wrap in Task with timeout to catch hangs
+    task = Task.async(fn -> Logix.tag_list(plc) end)
+    assert {:ok, {:error, :malformed_symbol_list}} = Task.yield(task, 2000)
+
+    Scanner.close(plc)
+  end
+
   test "empty partial-transfer template chunk returns an error, not a hang" do
     # symbol list: one structured tag (template instance 0x2E9), status success
     symbol = <<0x2E9::32-little, 5::16-little, "Motor", 0x82E9::16-little>>
@@ -149,6 +170,39 @@ defmodule Eipex.Scanner.LogixTest do
     {:ok, plc} = Scanner.start_link(host: {127, 0, 0, 1}, port: target.port)
 
     # Wrap in Task with timeout to catch hangs
+    task = Task.async(fn -> Logix.tag_list(plc) end)
+    assert {:ok, {:error, :malformed_template}} = Task.yield(task, 2000)
+
+    Scanner.close(plc)
+  end
+
+  test "template attrs reply short of the four requested attributes errors, not a crash" do
+    # symbol list: one structured tag (template instance 0x2E9), status success
+    symbol = <<0x2E9::32-little, 5::16-little, "Motor", 0x82E9::16-little>>
+
+    handler = fn mr ->
+      {:ok, %{service: service}} = Eipex.CIP.MessageRouter.decode_request(mr)
+
+      cond do
+        service == 0x55 ->
+          Eipex.CIP.MessageRouter.encode_response(0x55, 0x00, data: symbol)
+
+        service == 0x03 ->
+          # template attrs: only 1 of the 4 requested attributes came back
+          # (a device covering fewer attributes than asked) — decode_template_attributes
+          # returns a partial map missing :definition_size/:structure_size/:member_count.
+          data = <<1::16-little, 1::16-little, 0::16-little, 0x0FAB::16-little>>
+          Eipex.CIP.MessageRouter.encode_response(0x03, 0x00, data: data)
+
+        true ->
+          Eipex.CIP.MessageRouter.encode_response(service, 0x08)
+      end
+    end
+
+    target = ScriptedTarget.start(handler)
+    {:ok, plc} = Scanner.start_link(host: {127, 0, 0, 1}, port: target.port)
+
+    # Wrap in Task with timeout to catch hangs/crashes
     task = Task.async(fn -> Logix.tag_list(plc) end)
     assert {:ok, {:error, :malformed_template}} = Task.yield(task, 2000)
 

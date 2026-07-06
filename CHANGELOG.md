@@ -76,3 +76,4 @@
 - [Fixed] Logix write validates explicit types, catalog structs, and out-of-range float inference
 - [Added] cpppo interop for Logix read/write/bulk
 - [Added] Scanner Logix documentation and usage example
+- [Fixed] tag_list guards malformed template attrs and non-advancing symbol lists
