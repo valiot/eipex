@@ -59,3 +59,4 @@
 - [Added] Adapter class 1 I/O connections: cyclic production, watchdog, run/idle
 - [Added] Scanner open_io: class 1 I/O connections with owner notifications
 - [Fixed] Scanner I/O forward close tolerates a dead scanner (best-effort close)
+- [Added] Cross-role implicit I/O loopback matrix

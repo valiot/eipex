@@ -1,7 +1,7 @@
 defmodule Eipex.Adapter.IoLoopbackTest do
   use ExUnit.Case
 
-  alias Eipex.{CPF, Encap}
+  alias Eipex.{CPF, Encap, Scanner}
   alias Eipex.CIP.ConnectionManager, as: CM
   alias Eipex.CIP.MessageRouter, as: MR
   alias Eipex.CIP.Path
@@ -338,6 +338,166 @@ defmodule Eipex.Adapter.IoLoopbackTest do
         end
     after
       500 -> flunk("no production within 500ms")
+    end
+  end
+
+  describe "scanner loopback matrix" do
+    test "run/idle transition reaches the adapter handler" do
+      {_adapter, scanner} = start_scanner_pair()
+      assert {:ok, io} = open_scanner_io(scanner)
+
+      # the scanner always produces Run when o2t run_idle is configured, so
+      # the adapter's handler must see the idle -> run transition exactly once
+      assert_receive {:run_idle, :run}, 1_000
+      refute_receive {:run_idle, :run}, 200
+
+      Scanner.IOConnection.close(io)
+      Scanner.close(scanner)
+    end
+
+    test "adapter watchdog fires when the scanner's io connection dies" do
+      {_adapter, scanner} = start_scanner_pair()
+      assert {:ok, io} = open_scanner_io(scanner)
+
+      assert_receive {:conn_event, :opened}, 1_000
+
+      # io is linked to this test process (Scanner.open_io/2 calls start_link
+      # from the caller); trap exits so the :killed signal doesn't tear us down
+      old_trap = Process.flag(:trap_exit, true)
+      Process.exit(io, :kill)
+
+      receive do
+        {:EXIT, ^io, :killed} -> :ok
+      after
+        100 -> :ok
+      end
+
+      # no more O->T traffic reaches the adapter: its own watchdog fires and
+      # frees the triad (observed here via a fresh open_io succeeding again)
+      assert_receive {:conn_event, :timeout}, 1_000
+      Process.flag(:trap_exit, old_trap)
+
+      assert {:ok, io2} = open_scanner_io(scanner)
+      assert_receive {:eipex_io, ^io2, :data, _}, 1_000
+
+      Scanner.IOConnection.close(io2)
+      Scanner.close(scanner)
+    end
+
+    test "scanner watchdog fires when the adapter's io connection dies" do
+      {adapter, scanner} = start_scanner_pair()
+      assert {:ok, io} = open_scanner_io(scanner)
+
+      assert_receive {:eipex_io, ^io, :data, _}, 1_000
+
+      [{_, io_statem, _, _}] =
+        DynamicSupervisor.which_children(Eipex.Adapter.config(adapter).io.sup)
+
+      ref = Process.monitor(io_statem)
+      Process.exit(io_statem, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^io_statem, :killed}, 1_000
+
+      # no more T->O traffic reaches the scanner: its watchdog fires, notifies
+      # the owner and the io connection stops (normal exit, no crash)
+      assert_receive {:eipex_io, ^io, :timeout}, 1_000
+
+      io_ref = Process.monitor(io)
+      assert_receive {:DOWN, ^io_ref, :process, ^io, :normal}, 1_000
+
+      Scanner.close(scanner)
+    end
+
+    test "two quick set_output calls land in order; the last one wins" do
+      {adapter, scanner} = start_scanner_pair()
+      assert {:ok, io} = open_scanner_io(scanner)
+
+      assert_receive {:eipex_io, ^io, :data, _}, 1_000
+
+      :ok = Scanner.IOConnection.set_output(io, <<1, 1, 1, 1>>)
+      :ok = Scanner.IOConnection.set_output(io, <<2, 2, 2, 2>>)
+
+      assert eventually(fn ->
+               Eipex.Adapter.read_assembly(adapter, 150) == {:ok, <<2, 2, 2, 2>>}
+             end)
+
+      Scanner.IOConnection.close(io)
+      Scanner.close(scanner)
+    end
+
+    test "capacity applies to io connections" do
+      {_adapter, scanner} = start_scanner_pair(max_connections: 1)
+
+      assert {:ok, io} = open_scanner_io(scanner)
+
+      assert {:error, {:cip, :connection_failure, [0x0113]}} = open_scanner_io(scanner)
+
+      Scanner.IOConnection.close(io)
+      Scanner.close(scanner)
+    end
+
+    test "closing an io connection frees capacity for the next one" do
+      {_adapter, scanner} = start_scanner_pair(max_connections: 1)
+
+      assert {:ok, io} = open_scanner_io(scanner)
+      assert {:error, {:cip, :connection_failure, [0x0113]}} = open_scanner_io(scanner)
+
+      assert :ok = Scanner.IOConnection.close(io)
+
+      assert {:ok, io2} = open_scanner_io(scanner)
+      assert_receive {:eipex_io, ^io2, :data, _}, 1_000
+
+      Scanner.IOConnection.close(io2)
+      Scanner.close(scanner)
+    end
+  end
+
+  defp start_scanner_pair(adapter_extra \\ []) do
+    {:ok, adapter} =
+      Eipex.Adapter.start_link(
+        [
+          identity: @identity,
+          handler: IoHandler,
+          assemblies: [
+            input: [instance: 100, size: 4],
+            output: [instance: 150, size: 4],
+            config: [instance: 151, size: 2]
+          ],
+          port: 0,
+          io_udp_port: 0
+        ] ++ adapter_extra
+      )
+
+    {:ok, port} = Eipex.Adapter.port(adapter)
+
+    {:ok, scanner} =
+      Scanner.start_link(
+        host: {127, 0, 0, 1},
+        port: port,
+        vendor_id: 0x004D,
+        serial_number: 0xDEAD_0001
+      )
+
+    {adapter, scanner}
+  end
+
+  defp open_scanner_io(scanner, extra \\ []) do
+    Scanner.open_io(
+      scanner,
+      [
+        o_to_t: [assembly: 150, size: 4, rpi: 20_000, run_idle: true],
+        t_to_o: [assembly: 100, size: 4, rpi: 20_000, run_idle: false],
+        config: [assembly: 151],
+        timeout_multiplier: 0,
+        owner: self()
+      ] ++ extra
+    )
+  end
+
+  defp eventually(fun, tries \\ 50) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true -> Process.sleep(20) && eventually(fun, tries - 1)
     end
   end
 end
