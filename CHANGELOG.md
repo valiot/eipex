@@ -66,3 +66,4 @@
 - [Fixed] Class 1 Forward Open via Unconnected Send resolves the real peer, not localhost
 - [Added] Exclusive-owner conflict detection and randomized I/O connection ids
 - [Fixed] Interop port hygiene, peername race, and I/O documentation
+- [Added] Logix value layer: struct/array/string decode and atomic write encode
