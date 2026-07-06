@@ -78,3 +78,4 @@
 - [Added] Scanner Logix documentation and usage example
 - [Fixed] tag_list guards malformed template attrs and non-advancing symbol lists
 - [Fixed] Logix write: array-catalog scalar writes, real range guard, corrected array-write docs
+- [Added] Tag path parsing for element and member addressing (Tag[i], A.B)

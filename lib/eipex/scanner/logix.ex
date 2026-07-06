@@ -48,10 +48,14 @@ defmodule Eipex.Scanner.Logix do
   - **Deep nesting best-effort** — UDT members may contain nested structs up
     to two levels; beyond that, nesting is decoded best-effort using
     template offsets (documented in `Eipex.Scanner.Logix.Value`).
-  - **Array-element addressing not yet supported** — Tag names like
-    `"Array[0]"` are sent as-is (one symbolic segment); use whole-array reads
-    or address elements via separate tag definitions. Bulk reads accept tag
-    names in any symbolic form the controller supports.
+  - **Element and member addressing** — a tag name is parsed (`tag_path/1`)
+    into EPATH segments before every read/write: `"Tag[3]"` becomes a
+    symbolic segment plus a member segment, `"A.B"` becomes successive
+    symbolic segments, and a leading `Program:Name` scope prefix (kept
+    whole, since it's split on `.` not `:`) works the same way. Deferred —
+    parsed into the expected member segment(s) but not confirmed against a
+    real controller (loopback alone can't settle it): bit access via a
+    trailing bare index (`"Flags.3"`) and indices beyond 2 dimensions.
   - **Tag list over UCMM only** — Symbol and Template Objects are discovered
     and fetched via UCMM (service 0x55, 0x03, 0x4C); a `connected: true`
     option on read/write does not apply to `tag_list/2`.
@@ -60,7 +64,7 @@ defmodule Eipex.Scanner.Logix do
   """
 
   alias Eipex.CIP.Logix, as: LogixCodec
-  alias Eipex.CIP.{MessageRouter, Types}
+  alias Eipex.CIP.{MessageRouter, Path, Types}
   alias Eipex.Scanner
   alias Eipex.Scanner.Logix.Value
 
@@ -323,12 +327,12 @@ defmodule Eipex.Scanner.Logix do
   @doc """
   Reads one tag or a list of tags.
 
-  A single `name` (a plain symbolic tag name, e.g. `"Rate"` or
-  `"Program:Main.Count"`) is read with a single Read Tag request
-  (`opts[:elements]`, default 1); a reply too big for one message
-  (`:partial_transfer`) switches to a Read Tag Fragmented loop that
-  reassembles the full value (stripping the repeated type header off every
-  continuation) before decoding. Returns `{:ok, %Eipex.Tag{}}`.
+  A single `name` (a tag name, e.g. `"Rate"`, `"Program:Main.Count"` or
+  `"Array[3]"` — parsed into EPATH segments by `tag_path/1`) is read with a
+  single Read Tag request (`opts[:elements]`, default 1); a reply too big
+  for one message (`:partial_transfer`) switches to a Read Tag Fragmented
+  loop that reassembles the full value (stripping the repeated type header
+  off every continuation) before decoding. Returns `{:ok, %Eipex.Tag{}}`.
 
   A list of names is read in batches packed into Multiple Service Packets,
   each batch kept under `opts[:connection_size]` (default 500 bytes) by an
@@ -393,6 +397,43 @@ defmodule Eipex.Scanner.Logix do
     end
   end
 
+  # -- Tag path parsing (element/member addressing) ----------------------------
+
+  # Matches a `base[i]` or `base[i,j,k]` trailing index list; `base` must be
+  # non-empty and the indices digits-only, so an unbalanced or non-numeric
+  # bracket (e.g. "Tag[abc") simply doesn't match and falls through to the
+  # whole-part-as-symbolic fallback below.
+  @element_pattern ~r/^(.+)\[([0-9]+(?:,[0-9]+)*)\]$/
+
+  @doc false
+  @spec tag_path(String.t()) :: [Path.segment()]
+  def tag_path(name) do
+    name
+    |> String.split(".")
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {part, index} -> tag_path_part(part, index) end)
+  end
+
+  defp tag_path_part(part, index) do
+    case Regex.run(@element_pattern, part) do
+      [_, base, indices] ->
+        members = indices |> String.split(",") |> Enum.map(&{:member, String.to_integer(&1)})
+        [{:symbolic, base} | members]
+
+      nil ->
+        # A bare numeric part after at least one symbolic segment is bit/member
+        # access (e.g. "Flags.3"); the very first part never is, so a purely
+        # numeric whole name still round-trips to one plain symbolic segment.
+        if index > 0 and numeric?(part) do
+          [{:member, String.to_integer(part)}]
+        else
+          [{:symbolic, part}]
+        end
+    end
+  end
+
+  defp numeric?(part), do: part != "" and String.match?(part, ~r/^[0-9]+$/)
+
   # -- Single-tag read + fragmentation ------------------------------------------
 
   defp read_one(server, name, opts, templates) do
@@ -400,7 +441,7 @@ defmodule Eipex.Scanner.Logix do
 
     case Scanner.generic_message(server,
            service: 0x4C,
-           symbolic: name,
+           path: tag_path(name),
            data: <<elements::16-little>>
          ) do
       {:ok, %{status_name: :success, data: data}} ->
@@ -452,7 +493,7 @@ defmodule Eipex.Scanner.Logix do
 
     case Scanner.generic_message(server,
            service: 0x52,
-           symbolic: name,
+           path: tag_path(name),
            data: <<elements::16-little, offset::32-little>>
          ) do
       {:ok, %{status_name: :success, data: chunk}} when byte_size(chunk) >= header_len ->
@@ -526,7 +567,7 @@ defmodule Eipex.Scanner.Logix do
 
     sub_reads =
       Enum.map(batch, fn {name, _index} ->
-        LogixCodec.encode_read_tag([symbolic: name], elements)
+        LogixCodec.encode_read_tag(tag_path(name), elements)
       end)
 
     data = LogixCodec.multiple_service_data(sub_reads)
@@ -674,7 +715,7 @@ defmodule Eipex.Scanner.Logix do
          elements = Keyword.get(opts, :elements, 1),
          data = type_prefix <> <<elements::16-little>> <> bytes,
          {:ok, %{status_name: :success}} <-
-           Scanner.generic_message(server, service: 0x4D, symbolic: name, data: data) do
+           Scanner.generic_message(server, service: 0x4D, path: tag_path(name), data: data) do
       :ok
     else
       {:ok, %{status_name: status_name, extended: extended}} ->

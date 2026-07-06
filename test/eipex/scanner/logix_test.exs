@@ -62,12 +62,57 @@ defmodule Eipex.Scanner.LogixTest do
   # *how* a read was carried out (one MSP vs. several fragments) and not
   # just its final result.
   defp mr_services(target) do
+    for %{service: service} <- mr_requests(target), do: service
+  end
+
+  # Same idea as `mr_services/1` but keeps the full decoded Message Router
+  # request (service, raw path, data) — lets a test assert exactly which
+  # EPATH segments went out over the wire for a given tag name.
+  defp mr_requests(target) do
     for %Eipex.Encap{command: :send_rr_data} = frame <- ScriptedTarget.frames(target) do
       {:ok, cpf} = Eipex.Encap.unwrap_cpf(frame)
       {:ok, items} = Eipex.CPF.decode(cpf)
       [{:unconnected_data, mr_request}] = for {:unconnected_data, _} = i <- items, do: i
-      {:ok, %{service: service}} = Eipex.CIP.MessageRouter.decode_request(mr_request)
-      service
+      {:ok, request} = Eipex.CIP.MessageRouter.decode_request(mr_request)
+      request
+    end
+  end
+
+  # -- Tag path parsing (element/member addressing) ----------------------------
+
+  describe "tag_path/1" do
+    test "a plain name with no dot or bracket is unchanged" do
+      assert Logix.tag_path("Tag") == [{:symbolic, "Tag"}]
+    end
+
+    test "a bracketed index becomes a member segment" do
+      assert Logix.tag_path("Tag[3]") == [{:symbolic, "Tag"}, {:member, 3}]
+    end
+
+    test "dotted access splits into successive symbolic segments" do
+      assert Logix.tag_path("Motor.Speed") == [{:symbolic, "Motor"}, {:symbolic, "Speed"}]
+    end
+
+    test "a dotted part with a bracketed index expands to symbolic + member" do
+      assert Logix.tag_path("A.B[2]") == [{:symbolic, "A"}, {:symbolic, "B"}, {:member, 2}]
+    end
+
+    test "a leading Program:Name scope prefix stays one symbolic segment" do
+      assert Logix.tag_path("Program:Main.Count") ==
+               [{:symbolic, "Program:Main"}, {:symbolic, "Count"}]
+    end
+
+    test "multiple indices expand to one member segment each" do
+      assert Logix.tag_path("Grid[1,2]") ==
+               [{:symbolic, "Grid"}, {:member, 1}, {:member, 2}]
+    end
+
+    test "a bare numeric part after a symbolic segment is a member (bit access)" do
+      assert Logix.tag_path("Flags.3") == [{:symbolic, "Flags"}, {:member, 3}]
+    end
+
+    test "a malformed bracket falls back to treating the whole part as symbolic" do
+      assert Logix.tag_path("Tag[abc") == [{:symbolic, "Tag[abc"}]
     end
   end
 
@@ -242,6 +287,22 @@ defmodule Eipex.Scanner.LogixTest do
 
     # exactly one Multiple Service Packet round trip, not three plain reads
     assert mr_services(target) == [0x0A]
+
+    Scanner.close(plc)
+  end
+
+  test "read/2 sends an element index as a parsed member segment over the wire" do
+    {plc, target} = start_plc_with_target(read_spec())
+
+    # The responder resolves a wire path back to a tag by its first symbolic
+    # segment (see LogixResponder.path_symbolic/1), so "SCADA[3]" still
+    # round-trips to the whole "SCADA" value — this test is about the wire
+    # path the request actually carries, not per-element decoding.
+    assert {:ok, %Eipex.Tag{name: "SCADA[3]", value: 4321, error: nil}} =
+             Logix.read(plc, "SCADA[3]")
+
+    assert [%{service: 0x4C, path: path}] = mr_requests(target)
+    assert {:ok, [{:symbolic, "SCADA"}, {:member, 3}]} = Eipex.CIP.Path.decode(path)
 
     Scanner.close(plc)
   end
