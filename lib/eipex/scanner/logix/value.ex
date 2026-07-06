@@ -152,6 +152,25 @@ defmodule Eipex.Scanner.Logix.Value do
   end
 
   defp decode_member(
+         %{symbol_type: %{atomic_type: atomic_type}, info: count} = member,
+         _next,
+         body,
+         _templates,
+         _level
+       )
+       when is_atom(atomic_type) and not is_nil(atomic_type) and is_integer(count) and count >= 2 do
+    case element_size(atomic_type) do
+      nil ->
+        {:error, {:unknown_type, atomic_type}}
+
+      size ->
+        with {:ok, chunk} <- slice(body, member.offset, size * count) do
+          decode_array_elements(atomic_type, chunk, size)
+        end
+    end
+  end
+
+  defp decode_member(
          %{symbol_type: %{atomic_type: atomic_type}} = member,
          _next,
          body,
@@ -171,6 +190,17 @@ defmodule Eipex.Scanner.Logix.Value do
   end
 
   defp decode_member(_member, _next, _body, _templates, _level), do: {:error, :bad_member}
+
+  defp decode_array_elements(_atomic_type, <<>>, _element_size), do: {:ok, []}
+
+  defp decode_array_elements(atomic_type, chunk, element_size) do
+    <<element::binary-size(element_size), rest::binary>> = chunk
+
+    with {:ok, value} <- Types.decode(atomic_type, element),
+         {:ok, values} <- decode_array_elements(atomic_type, rest, element_size) do
+      {:ok, [value | values]}
+    end
+  end
 
   defp slice(body, offset, size) when offset >= 0 and size >= 0 do
     if offset + size <= byte_size(body) do

@@ -85,6 +85,64 @@ defmodule Eipex.Scanner.Logix.ValueTest do
     assert Value.string?(template)
   end
 
+  test "decodes an array member as a list of elements" do
+    # UDT: scores INT[3] @0 (info=3), flag BOOL @6 bit0
+    template = %{
+      name: "WithArray",
+      structure_size: 8,
+      members: [
+        %{
+          name: "scores",
+          raw_type: 0x00C3,
+          symbol_type: %{atomic_type: :int, structure?: false},
+          offset: 0,
+          info: 3
+        },
+        %{
+          name: "flag",
+          raw_type: 0x00C1,
+          symbol_type: %{atomic_type: :bool, bool_position: 0, structure?: false},
+          offset: 6,
+          info: 0
+        }
+      ]
+    }
+
+    body = <<10::16-little, 20::16-little, 30::16-little, 0x01, 0x00>>
+    templates = %{0x3333 => template}
+
+    assert {:ok, %{"scores" => [10, 20, 30], "flag" => true}} =
+             Value.decode_reply(<<0xA0, 0x02, 0x33, 0x33, body::binary>>, templates)
+  end
+
+  test "scalar members with info 0 or 1 stay scalars" do
+    template = %{
+      name: "Scalars",
+      structure_size: 4,
+      members: [
+        %{
+          name: "a",
+          raw_type: 0x00C3,
+          symbol_type: %{atomic_type: :int, structure?: false},
+          offset: 0,
+          info: 0
+        },
+        %{
+          name: "b",
+          raw_type: 0x00C3,
+          symbol_type: %{atomic_type: :int, structure?: false},
+          offset: 2,
+          info: 1
+        }
+      ]
+    }
+
+    body = <<7::16-little, 9::16-little>>
+
+    assert {:ok, %{"a" => 7, "b" => 9}} =
+             Value.decode_reply(<<0xA0, 0x02, 1, 0, body::binary>>, %{0x0001 => template})
+  end
+
   test "encodes atomic values for writes" do
     assert {:ok, {<<0xC4, 0x00>>, <<0x0E, 0x00, 0x00, 0x00>>}} = Value.encode(14, :dint, %{})
     assert {:ok, {<<0xC1, 0x00>>, <<0xFF>>}} = Value.encode(true, :bool, %{})

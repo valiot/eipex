@@ -67,3 +67,4 @@
 - [Added] Exclusive-owner conflict detection and randomized I/O connection ids
 - [Fixed] Interop port hygiene, peername race, and I/O documentation
 - [Added] Logix value layer: struct/array/string decode and atomic write encode
+- [Fixed] Logix struct decode reads array members as element lists
