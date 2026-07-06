@@ -15,8 +15,14 @@ defmodule Eipex.TestSupport.LogixResponder do
     * `:templates` — `%{template_instance => udt/1 output}`.
     * `:template_chunk_size` — max bytes returned per Read Template reply
       fragment (defaults to the whole definition in one reply).
-    * `:tags` — `%{name => {type_atom, value}}`, the mutable atomic tag
-      store backing symbolic read/write (defaults to `%{}`).
+    * `:tags` — `%{name => {type_atom, value}}` for an atomic tag
+      (`value` a scalar, or a list for an array), or `%{name => {:struct,
+      handle, body}}` for a structured tag's raw encoded body. Backs
+      symbolic read/write (defaults to `%{}`).
+    * `:tag_chunk_size` — max total reply bytes (type header + value slice)
+      for a single Read Tag (0x4C) or Read Tag Fragmented (0x52) reply;
+      forces `:partial_transfer` continuations in tests (defaults to
+      unbounded — the whole value in one reply).
 
   Reused unchanged by the read and write task suites that build on
   `tag_list/2`.
@@ -94,9 +100,12 @@ defmodule Eipex.TestSupport.LogixResponder do
     if template_path?(path) do
       read_template_reply(path, data, spec)
     else
-      read_tag_reply(path, data, agent)
+      read_tag_reply(path, data, agent, spec)
     end
   end
+
+  defp dispatch(0x52, path, data, spec, agent),
+    do: read_tag_fragmented_reply(path, data, agent, spec)
 
   defp dispatch(0x4D, path, data, _spec, agent), do: write_tag_reply(path, data, agent)
   defp dispatch(0x0A, _path, data, spec, agent), do: multiple_service_reply(data, spec, agent)
@@ -184,21 +193,78 @@ defmodule Eipex.TestSupport.LogixResponder do
 
   # -- Tag read/write (symbolic paths) -----------------------------------------
 
-  defp read_tag_reply(path, <<_elements::16-little>>, agent) do
+  defp read_tag_reply(path, <<_elements::16-little>>, agent, spec) do
     name = path_symbolic(path)
 
-    case Agent.get(agent, &Map.fetch(&1, name)) do
-      {:ok, {type, value}} ->
-        {:ok, encoded} = Types.encode(type, value)
-
-        MessageRouter.encode_response(0x4C, 0x00,
-          data: <<Types.type_code(type)::16-little, encoded::binary>>
-        )
+    case fetch_encoded_value(agent, name) do
+      {:ok, full} ->
+        {data, status} = chunk_reply(full, 0, spec)
+        MessageRouter.encode_response(0x4C, status, data: data)
 
       :error ->
         MessageRouter.encode_response(0x4C, 0x16)
     end
   end
+
+  defp read_tag_fragmented_reply(path, <<_elements::16-little, offset::32-little>>, agent, spec) do
+    name = path_symbolic(path)
+
+    case fetch_encoded_value(agent, name) do
+      {:ok, full} ->
+        {data, status} = chunk_reply(full, offset, spec)
+        MessageRouter.encode_response(0x52, status, data: data)
+
+      :error ->
+        MessageRouter.encode_response(0x52, 0x16)
+    end
+  end
+
+  defp fetch_encoded_value(agent, name) do
+    case Agent.get(agent, &Map.fetch(&1, name)) do
+      {:ok, {:struct, handle, body}} ->
+        {:ok, <<0xA0, 0x02, handle::16-little, body::binary>>}
+
+      {:ok, {type, value}} ->
+        {:ok, <<Types.type_code(type)::16-little, encode_elements(type, value)::binary>>}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp encode_elements(type, values) when is_list(values) do
+    for v <- values, into: <<>> do
+      {:ok, bytes} = Types.encode(type, v)
+      bytes
+    end
+  end
+
+  defp encode_elements(type, value) do
+    {:ok, bytes} = Types.encode(type, value)
+    bytes
+  end
+
+  # Slices `full` (type header + value bytes) into one reply starting at
+  # `byte_offset` into the value; the header always repeats at the front of
+  # the reply, exactly like a real controller's Read Tag / Read Tag
+  # Fragmented replies. `spec[:tag_chunk_size]` caps the total reply size
+  # (header + slice), forcing `:partial_transfer` (0x06) continuations in
+  # tests; it defaults to unbounded (the whole remaining value in one reply).
+  defp chunk_reply(full, byte_offset, spec) do
+    header_len = header_length(full)
+    header = binary_part(full, 0, header_len)
+    value_size = byte_size(full) - header_len
+    budget = Map.get(spec, :tag_chunk_size, value_size + header_len)
+    max_slice = max(budget - header_len, 0)
+    take = min(max(value_size - byte_offset, 0), max_slice)
+    slice = binary_part(full, header_len + byte_offset, take)
+    status = if byte_offset + take >= value_size, do: 0x00, else: 0x06
+
+    {header <> slice, status}
+  end
+
+  defp header_length(<<0xA0, 0x02, _rest::binary>>), do: 4
+  defp header_length(_), do: 2
 
   defp write_tag_reply(path, <<type_code::16-little, _elements::16-little, bytes::binary>>, agent) do
     name = path_symbolic(path)
