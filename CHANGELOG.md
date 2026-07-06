@@ -51,3 +51,4 @@
 - [Added] Adapter serves connected requests with sequence dedup and reply caching
 - [Added] Connected loopback tests and pycomm3 connected-messaging interop
 - [Fixed] Scoped scanner request rescue; RegisterSession rejects unsupported versions
+- [Fixed] forward_open guard at dequeue, 0x0107 close handling, variant validation

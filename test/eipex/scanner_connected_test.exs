@@ -65,6 +65,30 @@ defmodule Eipex.ScannerConnectedTest do
     Scanner.close(pid)
   end
 
+  test "forward_open rejects an unsupported variant instead of crashing" do
+    target = ScriptedTarget.start(fo_success_handler())
+    pid = start_scanner(target)
+
+    assert {:error, {:invalid_request, :variant}} =
+             Scanner.forward_open(pid, variant: :bogus)
+
+    assert Process.alive?(pid)
+    Scanner.close(pid)
+  end
+
+  test "a forward_open queued behind another still respects :already_connected" do
+    target = ScriptedTarget.start(fo_success_handler())
+    pid = start_scanner(target)
+
+    t1 = Task.async(fn -> Scanner.forward_open(pid, variant: :standard) end)
+    t2 = Task.async(fn -> Scanner.forward_open(pid, variant: :standard) end)
+
+    results = Enum.sort([Task.await(t1), Task.await(t2)])
+
+    assert [{:error, :already_connected}, {:ok, _conn}] = results
+    Scanner.close(pid)
+  end
+
   test "large rejection falls back to a standard forward open" do
     target = ScriptedTarget.start(fo_success_handler(reject_large: true))
     pid = start_scanner(target)
@@ -99,6 +123,44 @@ defmodule Eipex.ScannerConnectedTest do
 
     # can open again after closing
     assert {:ok, %{connection_serial: 2}} = Scanner.forward_open(pid)
+    Scanner.close(pid)
+  end
+
+  test "forward_close treats 0x0107 (target_connection_not_found) as already closed" do
+    handler = fn mr ->
+      {:ok, %{service: service, data: data}} = MessageRouter.decode_request(mr)
+
+      case service do
+        service when service in [0x54, 0x5B] ->
+          {:ok, fo} = CM.decode_forward_open(service, data)
+
+          reply = %CM.ForwardOpenReply{
+            o2t_connection_id: 0xAAAA_0001,
+            t2o_connection_id: fo.t2o_connection_id,
+            connection_serial: fo.connection_serial,
+            originator_vendor_id: fo.originator_vendor_id,
+            originator_serial: fo.originator_serial,
+            o2t_api: fo.o2t_rpi,
+            t2o_api: fo.t2o_rpi,
+            application_reply: <<>>
+          }
+
+          MessageRouter.encode_response(service, 0x00, data: CM.encode_forward_open_reply(reply))
+
+        0x4E ->
+          MessageRouter.encode_response(0x4E, 0x01, extended: [0x0107])
+      end
+    end
+
+    target = ScriptedTarget.start(handler)
+    pid = start_scanner(target)
+
+    {:ok, _conn} = Scanner.forward_open(pid)
+    assert :ok = Scanner.forward_close(pid)
+
+    # the connection was cleared locally: a fresh forward_open must succeed,
+    # not report :already_connected
+    assert {:ok, _conn} = Scanner.forward_open(pid)
     Scanner.close(pid)
   end
 

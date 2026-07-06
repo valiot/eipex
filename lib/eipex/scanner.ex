@@ -196,10 +196,15 @@ defmodule Eipex.Scanner do
 
   def handle_call({:forward_open, opts}, from, state) do
     variant = Keyword.get(opts, :variant, :large)
-    {fo, state} = build_forward_open(state, variant)
-    mr = ConnectionManager.encode_forward_open(fo, variant)
-    meta = %{fo: fo, variant: variant, fallback: variant == :large}
-    dispatch_request(state, from, mr, state.timeout, {:forward_open, meta})
+
+    if variant in [:large, :standard] do
+      {fo, state} = build_forward_open(state, variant)
+      mr = ConnectionManager.encode_forward_open(fo, variant)
+      meta = %{fo: fo, variant: variant, fallback: variant == :large}
+      dispatch_request(state, from, mr, state.timeout, {:forward_open, meta})
+    else
+      {:reply, {:error, {:invalid_request, :variant}}, state}
+    end
   end
 
   def handle_call(:forward_close, _from, %State{connection: nil} = state) do
@@ -412,6 +417,12 @@ defmodule Eipex.Scanner do
     next_request(state)
   end
 
+  defp send_request(%State{connection: conn} = state, from, _mr, _timeout, {:forward_open, _meta})
+       when not is_nil(conn) do
+    GenServer.reply(from, {:error, :already_connected})
+    next_request(state)
+  end
+
   defp send_request(state, from, {:unit, mr}, timeout, :connected) do
     conn = state.connection
     seq = conn.seq
@@ -572,6 +583,13 @@ defmodule Eipex.Scanner do
   defp settle_reply(:forward_close, reply, from, state) do
     case reply do
       {:ok, %{status_name: :success}} ->
+        GenServer.reply(from, :ok)
+        next_request(%{state | connection: nil})
+
+      # the target has already timed out/dropped this connection: treat the
+      # close as having succeeded rather than wedging the scanner permanently
+      # in :already_connected (real targets idle-timeout class 3 connections)
+      {:ok, %{status_name: _name, extended: [0x0107]}} ->
         GenServer.reply(from, :ok)
         next_request(%{state | connection: nil})
 
