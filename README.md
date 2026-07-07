@@ -83,8 +83,9 @@ typed values:
     :ok = Eipex.Scanner.close(scanner)
 
 Refer to `Eipex.Scanner.Logix` for detailed documentation on type
-resolution, bulk batching, fragmentation, and scope limitations (structure
-writes unsupported, array-element addressing via symbolic name only).
+resolution, bulk batching, fragmentation, tag/element addressing
+(`Tag[i]`, `A.B`), and scope limitations (structure writes and
+multi-element array writes unsupported).
 
 ## Interop testing
 

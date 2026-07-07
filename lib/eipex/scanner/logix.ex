@@ -42,9 +42,9 @@ defmodule Eipex.Scanner.Logix do
   - **Structure writes unsupported** — `write/4` rejects struct values with
     `:struct_write_unsupported`. Only atomic *scalar* writes are supported;
     `Value.encode/3` has no list/array encoding path, so a multi-element
-    array write is not yet implemented (deferred) — a catalog array tag
-    resolves to its base atomic type so a *single-element* write still
-    succeeds (see `resolve_write_type/3`).
+    array write is not implemented — a catalog array tag resolves to its
+    base atomic type so a *single-element* write still succeeds (see
+    `resolve_write_type/3`).
   - **Deep nesting best-effort** — UDT members may contain nested structs up
     to two levels; beyond that, nesting is decoded best-effort using
     template offsets (documented in `Eipex.Scanner.Logix.Value`).
@@ -701,7 +701,7 @@ defmodule Eipex.Scanner.Logix do
   the encoder propagates as-is; a value that doesn't fit the resolved type
   (wrong shape, or out of range — e.g. a `:real` magnitude beyond ±3.4e38)
   returns `{:error, :bad_value}`. Only atomic scalar writes are supported —
-  a multi-element array write is not yet implemented (deferred).
+  a multi-element array write is not implemented.
   """
   @spec write(GenServer.server(), String.t(), term(), keyword()) ::
           :ok | {:error, term()}

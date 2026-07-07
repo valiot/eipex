@@ -7,7 +7,7 @@ defmodule Eipex.Scanner.Logix.Value do
   structures and Logix STRING structs. Encode (`encode/3`) is narrower: only
   atomic *scalar* values (and `:bool`) are supported for writes; struct
   values are rejected with `:struct_write_unsupported`, and multi-element
-  array writes are not yet implemented (this phase).
+  array writes are not implemented.
 
   A template is `%{name, members, structure_size}` as produced by
   `Eipex.CIP.Logix.decode_template_definition/2` (registry adds

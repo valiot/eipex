@@ -13,18 +13,23 @@ defmodule Eipex.Interop.CpppoLogixTest do
       logical path segment (CIP logical type 0x28, the 32-bit-padded form
       `Eipex.CIP.Path` calls `{:member, n}`) appended after the ANSI
       symbolic segment, never by embedding `"[n]"` inside the symbolic name
-      itself. `Scanner.Logix.read/2` and `write/3` always send the given
-      tag name as one opaque symbolic segment (see `request_path/1` in
-      `lib/eipex/scanner.ex`), so `"SCADA[0]"` is not a name either function
-      can resolve: cpppo's Symbol Object rejects the literal string with
+      itself. That was originally a problem here: `Scanner.Logix.read/2`
+      and `write/3` used to send the given tag name as one opaque symbolic
+      segment, so `"SCADA[0]"` was not a name either function could
+      resolve — cpppo's Symbol Object rejected the literal string with
       `Unrecognized symbolic name 'SCADA[0]'`, and — exactly as the sibling
-      `cpppo_test.exs` documents for any unresolvable symbol — cpppo drops
-      the session, the pending call fails with `{:error, {:encap, _}}`, and
-      the linked scanner process is killed. Element-indexed addressing is
-      therefore out of scope for `Scanner.Logix` as implemented; this suite
-      instead exercises three distinct atomic tags (an INT array read at
-      its implicit first element, plus a scalar REAL and SINT) to cover
-      read, write and bulk Multiple Service Packet read.
+      `cpppo_test.exs` documents for any unresolvable symbol — cpppo
+      dropped the session, the pending call failed with
+      `{:error, {:encap, _}}`, and the linked scanner process was killed.
+      `Eipex.Scanner.Logix.tag_path/1` now parses `"Tag[n]"` (and dotted
+      member access like `"A.B"`) into the symbolic-plus-member segment
+      pair before every read/write, so element addressing is implemented —
+      but that parser hasn't been exercised against a live cpppo run since
+      it was added, so this suite still exercises three distinct atomic
+      tags (an INT array read at its implicit first element, plus a scalar
+      REAL and SINT) rather than an indexed `"SCADA[0]"` read/write, to
+      cover read, write and bulk Multiple Service Packet read without
+      depending on an unverified wire path.
 
     * Type checking. cpppo rejects a write whose CIP type code doesn't
       match the tag's declared type ("Tag type 196 ... doesn't fit within

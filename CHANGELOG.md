@@ -80,3 +80,4 @@
 - [Fixed] Logix write: array-catalog scalar writes, real range guard, corrected array-write docs
 - [Added] Tag path parsing for element and member addressing (Tag[i], A.B)
 - [Added] Package metadata, Apache-2.0 LICENSE and ex_doc documentation generation
+- [Added] Library overview moduledoc and documentation accuracy pass

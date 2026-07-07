@@ -3,10 +3,28 @@ defmodule Eipex.Scanner do
   EtherNet/IP scanner (originator) session for explicit and implicit messaging.
 
   One process per target device: owns the TCP connection to port 44818,
-  registers the encapsulation session, and serializes UCMM requests.
-  There is no automatic reconnection: when the connection drops, the
-  process exits `{:shutdown, :connection_lost}` and the owning
-  application decides whether and when to retry.
+  registers the encapsulation session, and serializes requests (one in
+  flight at a time; later calls queue behind it). There is no automatic
+  reconnection: when the connection drops, the process exits
+  `{:shutdown, :connection_lost}` and the owning application decides
+  whether and when to retry. Because of that, callers should either
+  supervise this process, or — if calling `start_link/1` directly from a
+  process that isn't a supervisor — trap exits, so the shutdown arrives as
+  a normal message instead of taking the caller down too.
+
+  A request's `:timeout` is time *on the wire*, not time since the call
+  was made: the per-request timer starts only when the request is
+  actually sent, so a request queued behind several slow ones can return
+  well after its own timeout has elapsed relative to when it was issued.
+
+  `route_path` — a list of `Eipex.CIP.Path` port segments (e.g.
+  `[{:port, 1, 0}]`), or the `backplane: slot` shorthand for it — tells the
+  scanner how to reach a target beyond the direct connection (for example,
+  a module in a specific backplane slot behind a gateway). Set at
+  `start_link/1` and overridable per call via the `:route_path` option: a
+  route wraps unconnected requests in an Unconnected Send and is used as
+  the connection path for `forward_open/2`; the default `:none` sends
+  requests directly to the connected device.
 
   Supports three messaging classes:
 
