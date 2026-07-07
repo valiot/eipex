@@ -73,6 +73,10 @@ adapter roles, explicit + class 1 implicit messaging, and Logix tag services.
   fallback guard, 0x0107 close handling, variant validation), reply-cache
   purge on close, and class 1 Forward Open via Unconnected Send resolving
   the real peer instead of localhost.
+- Class 1 I/O: the scanner-side I/O connection's best-effort Forward Close
+  tolerates an already-dead scanner; the adapter session handler survives a
+  peer reset between accept and activation and enforces zeroed RegisterSession
+  option flags.
 - Logix: struct decode reads array members as element lists; `tag_list`
   rejects empty/degenerate partial-transfer replies and guards malformed
   template and symbol-list chunks; bulk read accounts for Multiple Service
