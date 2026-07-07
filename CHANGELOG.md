@@ -1,85 +1,81 @@
 # Changelog
 
-## v0.1.0-dev
+## v0.1.0 — 2026-07-06
 
-- [Added] Project scaffold with mise toolchain and test-only StreamData dependency
-- [Added] Encapsulation header codec with the 8 EtherNet/IP commands and status codes
-- [Added] Encapsulation command builders (RegisterSession, SendRRData, SendUnitData, ListIdentity)
-- [Added] CPF item codec and ListIdentity identity item (big-endian sockaddr handling)
-- [Fixed] CPF decode rejects malformed known items and trailing bytes after item count
-- [Added] EPATH codec: logical, symbolic and port segments with spec padding
-- [Fixed] EPATH symbolic encode raises on names longer than 255 bytes
-- [Added] Message Router request/response codec with CIP general status table
-- [Added] CIP elementary type codec and Logix 16-bit symbol type decoder
-- [Fixed] 64-bit type encode rejects out-of-range integers instead of truncating
-- [Added] Connection Manager codec: Forward Open/Close, Unconnected Send, conn params
-- [Fixed] Connection params encode rejects out-of-range sizes instead of masking
-- [Added] Logix services codec: tag read/write, RMW, MSP, symbol list, templates
-- [Fixed] Template attribute decode returns error on unexpected attribute ids
-- [Fixed] Non-finite float decode, unknown encap command context, encode size guards
-- [Added] Property-based roundtrip tests for EPATH and CIP types
-- [Added] Scanner session lifecycle (RegisterSession over TCP) and scripted test target
-- [Added] Scanner generic_message: UCMM requests with correlation, queueing and timeouts
-- [Fixed] generic_message outer call waits on the server-side request timer
-- [Added] Scanner Unconnected Send routing and get/set attribute helpers
-- [Fixed] route_path override test exercises real precedence
-- [Added] Scanner NOP keepalive and explicit connection-loss semantics
-- [Added] UDP ListIdentity discovery (broadcast and unicast)
-- [Fixed] Discovery closes the UDP socket when the initial send fails
-- [Added] cpppo interop harness (docker compose + tagged interop tests)
-- [Added] CI workflow (format check + tests) on X64 runner
-- [Added] Expose Multiple Service Packet data body for scanner-side batching
-- [Fixed] Scanner send failures stop the session with connection_lost instead of crashing
-- [Fixed] Hermetic discovery leak test without DNS; test timing hardening
-- [Added] Unconnected Send decode and unknown-command encapsulation replies
-- [Added] Adapter skeleton: config, assembly store and owner process
-- [Fixed] Adapter start_link returns a clean error for incomplete identity options
-- [Added] Adapter message router dispatch, object/handler behaviours and Identity object
-- [Added] Assembly object with handler-mediated reads and writes
-- [Added] Connection Manager (Unconnected Send), TCP/IP Interface and Ethernet Link objects
-- [Added] Adapter TCP listener and session handler; loopback tests against our scanner
-- [Fixed] Session handler discards frames pipelined after UnregisterSession
-- [Added] UDP ListIdentity discovery responder with anti-storm delay
-- [Fixed] Discovery responder survives stray and udp_error messages
-- [Added] pycomm3 interop harness for the adapter
-- [Fixed] Scanner: pipelined-byte buffering, invalid-request isolation, derived timeout ticks
-- [Fixed] Clean session teardown, acceptor backoff and route-truncation coverage
-- [Fixed] ListIdentity advertises the configured IP and resolved TCP port
-- [Added] Forward Close reply and Forward Open error-reply codecs
-- [Added] Scanner Forward Open/Close with large-to-standard fallback
-- [Added] Scanner connected requests over SendUnitData with sequence counts
-- [Added] Adapter class 3 Forward Open/Close with connection table and capacity
-- [Added] Adapter serves connected requests with sequence dedup and reply caching
-- [Added] Connected loopback tests and pycomm3 connected-messaging interop
-- [Fixed] Scoped scanner request rescue; RegisterSession rejects unsupported versions
-- [Fixed] forward_open guard at dequeue, 0x0107 close handling, variant validation
-- [Fixed] Connected reply cache purge on close; watchdog deviation documented; flags check
-- [Added] Implicit I/O helpers, handler I/O callbacks and connection-table I/O records
-- [Added] CPF extras threaded through adapter dispatch for I/O sockaddr exchange
-- [Added] Adapter shared I/O UDP socket with connection-id demux
-- [Added] Adapter class 1 I/O connections: cyclic production, watchdog, run/idle
-- [Added] Scanner open_io: class 1 I/O connections with owner notifications
-- [Fixed] Scanner I/O forward close tolerates a dead scanner (best-effort close)
-- [Added] Cross-role implicit I/O loopback matrix
-- [Added] OpENer interop harness for class 1 I/O
-- [Added] Implicit I/O documentation and usage examples
-- [Fixed] Class 1 Forward Open via Unconnected Send resolves the real peer, not localhost
-- [Added] Exclusive-owner conflict detection and randomized I/O connection ids
-- [Fixed] Interop port hygiene, peername race, and I/O documentation
-- [Added] Logix value layer: struct/array/string decode and atomic write encode
-- [Fixed] Logix struct decode reads array members as element lists
-- [Added] Scanner Logix tag_list: Symbol Object discovery with UDT template fetch
-- [Fixed] tag_list rejects empty partial-transfer symbol lists and template chunks
-- [Added] Scanner Logix read: typed values, bulk Multiple Service Packet, auto fragmentation
-- [Fixed] Bulk read accounts for MSP framing overhead and falls back when a batch is refused
-- [Added] Scanner Logix write with type inference from catalog or value
-- [Fixed] Logix write validates explicit types, catalog structs, and out-of-range float inference
-- [Added] cpppo interop for Logix read/write/bulk
-- [Added] Scanner Logix documentation and usage example
-- [Fixed] tag_list guards malformed template attrs and non-advancing symbol lists
-- [Fixed] Logix write: array-catalog scalar writes, real range guard, corrected array-write docs
-- [Added] Tag path parsing for element and member addressing (Tag[i], A.B)
-- [Added] Package metadata, Apache-2.0 LICENSE and ex_doc documentation generation
-- [Added] Library overview moduledoc and documentation accuracy pass
-- [Fixed] UDT BOOL member bit index read from the member info field
-- [Added] Sample adapter EDS and hex-ready README (install, feature matrix, limitations)
+First public release: a pure-Elixir EtherNet/IP (CIP) stack with scanner and
+adapter roles, explicit + class 1 implicit messaging, and Logix tag services.
+
+### Added
+
+- **Project**: pure-Elixir scaffold (mise toolchain, zero runtime deps) and a
+  CI workflow (format check + tests) on the X64 runner.
+- **Codecs**: encapsulation header and the 8 EtherNet/IP commands
+  (RegisterSession, SendRRData, SendUnitData, ListIdentity, Unconnected Send)
+  with status codes and unknown-command handling; CPF item codec and
+  ListIdentity identity item; EPATH codec (logical, symbolic and port
+  segments); CIP Message Router request/response codec with the general
+  status table; CIP elementary type codec and the Logix 16-bit symbol type
+  decoder; Connection Manager codec (Forward Open/Close, Unconnected Send,
+  connection parameters, Forward Close reply and Forward Open error replies);
+  Logix services codec (tag read/write, read-modify-write, Multiple Service
+  Packet, symbol list, templates).
+- **Scanner** (originator): session lifecycle over TCP; `generic_message`
+  UCMM requests with correlation, queueing and timeouts; Unconnected Send
+  routing and get/set attribute helpers; NOP keepalive and explicit
+  connection-loss semantics; UDP ListIdentity discovery (broadcast and
+  unicast); Multiple Service Packet batching; Forward Open/Close with
+  large-to-standard fallback; connected (class 3) requests over
+  SendUnitData; class 1 I/O connections (`open_io`) with cyclic production
+  and owner notifications.
+- **Adapter** (target): config, assembly store and owner process skeleton;
+  message router dispatch with object/handler behaviours; Identity,
+  Assembly, Connection Manager, TCP/IP Interface and Ethernet Link objects;
+  TCP listener and session handler; UDP ListIdentity discovery responder with
+  anti-storm delay; class 3 Forward Open/Close with a connection table,
+  capacity limits, sequence dedup and reply caching; class 1 I/O connections
+  (cyclic production, watchdog, run/idle) over a shared UDP socket (CPF
+  sockaddr extras for I/O exchange) with connection-id demux; exclusive-owner
+  conflict detection and randomized I/O connection ids.
+- **Logix tag services**: value layer (struct/array/string decode, atomic
+  write encode); `tag_list` Symbol Object discovery with UDT template fetch;
+  typed `read` (bulk Multiple Service Packet with auto fragmentation); typed
+  `write` with type inference from catalog or value; tag path parsing for
+  element and member addressing (`Tag[i]`, `A.B`).
+- **Testing**: property-based roundtrip tests for EPATH and CIP types;
+  cross-role loopback matrices (explicit, connected and class 1 I/O);
+  docker-gated interop harnesses against cpppo, pycomm3 and OpENer (excluded
+  by default).
+- **Docs & packaging**: package metadata, Apache-2.0 LICENSE and
+  ex_doc-generated documentation; a library overview moduledoc; a sample
+  adapter EDS; a hex-ready README (install, feature matrix, known
+  limitations).
+
+### Fixed
+
+- Codecs return `{:error, reason}` instead of raising or silently truncating
+  on malformed or out-of-range input: CPF item/trailing-byte validation,
+  EPATH symbolic name length guard, 64-bit and connection-parameter range
+  checks, non-finite float decode, unknown encapsulation commands, and Logix
+  template attribute decode.
+- Scanner: send and discovery-socket failures stop the session with an
+  explicit `{:shutdown, :connection_lost}` instead of crashing;
+  `generic_message` correlates on the server-side request timer;
+  RegisterSession rejects unsupported protocol versions; pipelined bytes,
+  invalid requests and derived timeout ticks are handled without corrupting
+  session state.
+- Adapter: `start_link` returns a clean error for incomplete identity
+  options; the session handler discards frames pipelined after
+  UnregisterSession and tears sessions down cleanly; the TCP acceptor backs
+  off on repeated accept errors; the discovery responder survives stray and
+  `udp_error` messages and advertises the configured IP and resolved TCP
+  port.
+- Connected messaging: Forward Open/Close edge cases (large-to-standard
+  fallback guard, 0x0107 close handling, variant validation), reply-cache
+  purge on close, and class 1 Forward Open via Unconnected Send resolving
+  the real peer instead of localhost.
+- Logix: struct decode reads array members as element lists; `tag_list`
+  rejects empty/degenerate partial-transfer replies and guards malformed
+  template and symbol-list chunks; bulk read accounts for Multiple Service
+  Packet framing overhead with a fallback path; write validates explicit,
+  catalog and inferred types; UDT BOOL member bit index is read from the
+  member info field rather than the type word.
