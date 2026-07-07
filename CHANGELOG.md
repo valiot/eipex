@@ -82,3 +82,4 @@
 - [Added] Package metadata, Apache-2.0 LICENSE and ex_doc documentation generation
 - [Added] Library overview moduledoc and documentation accuracy pass
 - [Fixed] UDT BOOL member bit index read from the member info field
+- [Added] Sample adapter EDS and hex-ready README (install, feature matrix, limitations)

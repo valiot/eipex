@@ -1,0 +1,136 @@
+$ ============================================================================
+$ Eipex sample adapter -- Electronic Data Sheet (EDS)
+$
+$ SAMPLE FILE, not a certified product EDS. Import it into a scanner
+$ configuration tool (Rockwell RSNetWorx for EtherNet/IP, Studio 5000's
+$ generic-EDS/Add-on Profile import, or any other ODVA EDS-aware tool) to
+$ add this adapter to a scan list with its identity and one exclusive-owner
+$ class 1 I/O connection pre-described.
+$
+$ Matches the config shown in README.md's "Usage: Adapter" section:
+$
+$   Eipex.Adapter.start_link(
+$     identity: [
+$       vendor_id: 0xFFFF,                   # REPLACE with your ODVA Vendor ID
+$       product_code: 1,                     # REPLACE with your product code
+$       product_name: "Eipex Sample Adapter",
+$       device_type: 0x0C,                   # Communications Adapter
+$       revision: {1, 0}
+$     ],
+$     assemblies: [
+$       input:  [instance: 100, size: 32],   # T->O, adapter produces
+$       output: [instance: 150, size: 32],   # O->T, adapter consumes
+$       config: [instance: 151, size: 1]
+$     ],
+$     handler: MyApp.Handler
+$   )
+$
+$ VendCode (65535 / 0xFFFF) and ProdCode (1) below are PLACEHOLDERS. 65535 is
+$ an ODVA-reserved value that can never be a real vendor, chosen so nobody
+$ mistakes this sample for a real device -- replace both with your
+$ ODVA-assigned Vendor ID and your own product code before shipping.
+$
+$ The connection parameters (transport class 1, cyclic trigger, exclusive
+$ owner, point-to-point, 32-bit run/idle header on O->T only, T->O pure
+$ data, RPI 1 ms - 10 s) are cross-checked against what this repository's
+$ Eipex.Adapter.Object.ConnectionManager actually validates -- see
+$ validate_io_types/1, validate_rpis/1 and validate_io_size/4 in
+$ lib/eipex/adapter/object/connection_manager.ex. The connection path
+$ "20 04 24 97 2C 96 2C 64" decodes to class 4 (Assembly), instance 151
+$ (config), connection point 150 (O->T) and connection point 100 (T->O) --
+$ the same instance numbers Eipex.Adapter.AssemblyStore is configured with
+$ above.
+$
+$ Format reference: ODVA "The EDS Specification" (CIP Networks Library,
+$ Volume 1, Chapter 7). Authored by hand against that reference and
+$ structurally cross-checked against the real sample EDS shipped by
+$ EIPStackGroup/OpENer (github.com/EIPStackGroup/OpENer,
+$ data/opener_sample_app.eds) -- the same reference adapter this project's
+$ interop tests (test/interop/opener_test.exs) run against, which happens
+$ to use the identical assembly numbering (100/150/151). This is a
+$ correct, importable skeleton, not an exhaustive rendering of every
+$ optional EDS field.
+$ ============================================================================
+
+[File]
+    DescText =      "Eipex sample EtherNet/IP adapter";
+    CreateDate =    07-07-2026;
+    CreateTime =    00:00:00;
+    ModDate =       07-07-2026;
+    ModTime =       00:00:00;
+    Revision =      1.0;
+    HomeURL =       "https://github.com/valiot/eipex";
+
+[Device]
+    VendCode =      65535;      $ PLACEHOLDER -- replace with your ODVA Vendor ID
+    VendName =      "Your Company Name";
+    VendMajRev =    1;          $ EDS document revision (independent of the
+    VendMinRev =    0;          $ device revision MajRev/MinRev below)
+    ProdType =      12;         $ Communications Adapter
+    ProdTypeStr =   "Communications Adapter";
+    ProdCode =      1;          $ PLACEHOLDER -- replace with your product code
+    MajRev =        1;         $ device revision, Identity object attribute 4
+    MinRev =        0;         $ (matches Eipex.Adapter's `revision: {1, 0}` default)
+    ProdName =      "Eipex Sample Adapter";
+    Catalog =       "";
+
+[Device Classification]
+    Class1 =        EtherNetIP;
+
+[Params]
+    Param1 =
+        0,                  $ Reserved
+        ,,                  $ Link Path Size, Link Path -- none (not tied to
+                             $ another object's attribute)
+        0x0000,             $ Descriptor
+        0xC8,               $ Data Type: UDINT (32-bit unsigned)
+        4,                  $ Data Size, bytes
+        "RPI",
+        "",
+        "Requested Packet Interval, shared by O->T and T->O for Connection1.",
+        1000,               $ Minimum, usec (Eipex.Adapter.Object.ConnectionManager
+                             $ validate_rpis/1 lower bound)
+        10000000,           $ Maximum, usec (validate_rpis/1 upper bound)
+        20000,              $ Default, usec (20 ms)
+        ,,,,
+        ,,,,
+        ;
+
+[Assembly]
+    Assem100 =
+        "Input Assembly",   $ T->O: the adapter produces this (AssemblyStore
+                             $ kind :input) -- not network-settable
+        "",
+        32,
+        0x0000;
+
+    Assem150 =
+        "Output Assembly",  $ O->T: the adapter consumes this (kind :output)
+                             $ -- network-settable
+        "",
+        32,
+        0x0001;
+
+    Assem151 =
+        "Config Assembly",  $ kind :config -- network-settable; the app
+                             $ validates it in Handler.after_assembly_write/3
+        "",
+        1,
+        0x0001;
+
+[Connection Manager]
+    Connection1 =
+        0x84010002,          $ TransportTrigger: transport class 1, cyclic
+                             $ trigger, target is server (matches the adapter's
+                             $ transport: %{direction: :server, trigger: :cyclic,
+                             $ class: 1})
+        0x44640405,          $ O->T / T->O Network Connection Parameters:
+                             $ fixed size, point-to-point, 32-bit run/idle
+                             $ header on O->T, pure data (no run/idle) on T->O
+        Param1,,Assem150,    $ O->T: RPI via Param1, data from Assembly 150
+        Param1,,Assem100,    $ T->O: RPI via Param1, data from Assembly 100
+        ,,
+        ,Assem151,           $ Configuration data from Assembly 151
+        "Exclusive Owner",
+        "",
+        "20 04 24 97 2C 96 2C 64";
