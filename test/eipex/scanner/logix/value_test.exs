@@ -154,4 +154,30 @@ defmodule Eipex.Scanner.Logix.ValueTest do
   test "encode rejects an out-of-range :real instead of writing infinity" do
     assert {:error, :bad_value} = Value.encode(3.5e39, :real, %{})
   end
+
+  test "UDT BOOL member bit index comes from the member info field" do
+    # 1756-PM020 template member layout: INFO (UINT) + Data Type (UINT) +
+    # Offset (UDINT); INFO = bit position for a BOOL member. bool_position
+    # (from the symbol type word) is a different field and must be ignored
+    # here: it's 0, but the real bit (5) lives in `info`.
+    template = %{
+      name: "Bits",
+      structure_size: 4,
+      members: [
+        %{
+          name: "alarm",
+          raw_type: 0x00C1,
+          symbol_type: %{atomic_type: :bool, bool_position: 0, structure?: false},
+          offset: 0,
+          info: 5
+        }
+      ]
+    }
+
+    body = <<0x20, 0, 0, 0>>
+    templates = %{0x4444 => template}
+
+    assert {:ok, %{"alarm" => true}} =
+             Value.decode_reply(<<0xA0, 0x02, 0x44, 0x44, body::binary>>, templates)
+  end
 end

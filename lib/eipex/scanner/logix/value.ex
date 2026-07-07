@@ -123,13 +123,13 @@ defmodule Eipex.Scanner.Logix.Value do
     end)
   end
 
-  # TODO(phase-7): verify BOOL-in-UDT bit source against pycomm3/hardware.
-  # `bool_position` comes from the member's *symbol type word*
-  # (`Types.decode_symbol_type/1`, bits 8-10) rather than the member's `info`
-  # field; 1756-PM020 is ambiguous on which one a bit-packed BOOL member
-  # inside a UDT actually uses, and this can't be settled by loopback alone.
+  # 1756-PM020 §7 template member layout (INFO/UINT + Data Type/UINT +
+  # Offset/UDINT): INFO holds the bit position for a BOOL member. Confirmed
+  # independently in pycomm3 (logix_driver.py: `type_info` is read before the
+  # type code, then `member["bit"] = type_info` for BOOL). `bool_position`
+  # (from the Symbol object's type word) is unrelated to Template members.
   defp decode_member(
-         %{symbol_type: %{atomic_type: :bool, bool_position: pos}} = member,
+         %{symbol_type: %{atomic_type: :bool}, info: pos} = member,
          _next,
          body,
          _templates,

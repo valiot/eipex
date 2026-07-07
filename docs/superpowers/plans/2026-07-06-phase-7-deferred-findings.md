@@ -3,16 +3,28 @@
 Carried forward from the whole-branch review of `phase-6-logix-services`
 (b142c8e..8fe1e63). Address during Phase 7+ unless noted.
 
+## Resolved
+
+- **BOOL-in-UDT bit source** (Phase 7, Task 3) — confirmed the member's
+  `info` field is the BOOL bit source, not `bool_position` from the Symbol
+  object's type word. `docs/research/protocol-byte-layouts.md` §7 (1756-PM020,
+  verified against the manual's `STRUCT_B` byte example) states the Template
+  member layout is `INFO (UINT) + Data Type (UINT) + Offset (UDINT)`, with
+  INFO = "bit position if BOOL". Independently cross-checked against pycomm3
+  (`logix_driver.py`'s `_parse_template_data_member_info`): it reads
+  `type_info = UINT.decode(stream)` *before* the type code, then sets
+  `member["bit"] = type_info` for BOOL members — same field, same order.
+  `Eipex.CIP.Logix.decode_template_definition/2` already parses this word
+  verbatim into each member's `info` key; only `Value.decode_member`'s BOOL
+  clause was reading the wrong source. Fixed in `lib/eipex/scanner/logix/value.ex`
+  to read the bit from `info` instead of `symbol_type.bool_position`; the
+  `# TODO(phase-7)` is replaced with a citation. New test:
+  `test/eipex/scanner/logix/value_test.exs` "UDT BOOL member bit index comes
+  from the member info field" (bit 5, non-zero, so it can't pass by
+  coincidence with the old code's implicit bit-0 default).
+
 ## Fix during Phase 7 work
 
-- **BOOL-in-UDT bit source** — `Value.decode_member`'s bool clause reads
-  `bool_position` from the member's *symbol type word*
-  (`Types.decode_symbol_type/1`, bits 8-10) rather than a separate per-member
-  `info`-field bit; 1756-PM020 is ambiguous on which field a bit-packed BOOL
-  member inside a UDT actually uses on real hardware, and this can't be
-  settled by loopback alone. Marked at the call site with
-  `# TODO(phase-7): verify BOOL-in-UDT bit source against pycomm3/hardware`
-  in `lib/eipex/scanner/logix/value.ex`.
 - **Struct-array element lists** — `Logix.resolve_type/2` classifies an array
   of structs as `{:array, {:struct, handle}, dims}`, but
   `Value.decode_member`/`decode_struct` have no per-element struct-array

@@ -81,3 +81,4 @@
 - [Added] Tag path parsing for element and member addressing (Tag[i], A.B)
 - [Added] Package metadata, Apache-2.0 LICENSE and ex_doc documentation generation
 - [Added] Library overview moduledoc and documentation accuracy pass
+- [Fixed] UDT BOOL member bit index read from the member info field
