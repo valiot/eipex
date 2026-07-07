@@ -79,3 +79,4 @@
 - [Fixed] tag_list guards malformed template attrs and non-advancing symbol lists
 - [Fixed] Logix write: array-catalog scalar writes, real range guard, corrected array-write docs
 - [Added] Tag path parsing for element and member addressing (Tag[i], A.B)
+- [Added] Package metadata, Apache-2.0 LICENSE and ex_doc documentation generation
