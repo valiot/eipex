@@ -157,8 +157,8 @@ are resolved at runtime via `Eipex.Adapter.port/1` and
 Implement `Eipex.Adapter.Handler` to validate configuration writes, refresh
 input data before a read, or react to run/idle and connection events —
 unimplemented callbacks fall through to permissive defaults. See
-`Eipex.Adapter` for the full option list (`network`, `discovery`,
-`max_connections`, `inactivity_timeout`, `objects`).
+`Eipex.Adapter` for the remaining `start_link/1` options (`ip`, `network`,
+`discovery`, `max_connections`, `inactivity_timeout`, `objects`).
 
 A sample EDS matching this exact configuration ships with the package — see
 [EDS](#eds) below.
