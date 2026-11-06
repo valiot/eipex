@@ -2,9 +2,11 @@ defmodule Eipex.Adapter.IoConnection do
   @moduledoc """
   One class 1 (cyclic) I/O connection on the adapter side. Consumes O->T
   datagrams (sequence-validated, run/idle tracked, watchdog-guarded) and
-  produces T->O datagrams on the RPI from the input assembly. Point-to-point,
-  exclusive owner. Dies on watchdog timeout or Forward Close; the
-  ConnectionTable monitors this process, so death always releases the triad.
+  produces T->O datagrams on the RPI from the input assembly — to the
+  originator's endpoint, or to the configured multicast group when the
+  connection was opened with a multicast T->O. Exclusive owner. Dies on
+  watchdog timeout or Forward Close; the ConnectionTable monitors this
+  process, so death always releases the triad.
   """
 
   @behaviour :gen_statem

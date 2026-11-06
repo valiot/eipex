@@ -47,7 +47,8 @@ defmodule Eipex.Adapter.IoLoopbackTest do
           config: [instance: 151, size: 2]
         ],
         port: 0,
-        io_udp_port: 0
+        io_udp_port: 0,
+        io: [multicast: [group: {239, 192, 77, 1}, interface: {127, 0, 0, 1}, ttl: 1]]
       )
 
     {:ok, tcp_port} = Eipex.Adapter.port(adapter)
@@ -138,7 +139,7 @@ defmodule Eipex.Adapter.IoLoopbackTest do
       t2o_rpi: rpi,
       t2o_params: %{
         owner: :exclusive,
-        type: conn_type,
+        type: Keyword.get(overrides, :t2o_conn_type, conn_type),
         priority: :low,
         size_type: :fixed,
         size: t2o_size
@@ -160,7 +161,7 @@ defmodule Eipex.Adapter.IoLoopbackTest do
     {:ok, items} = CPF.decode(rcpf)
     [{:unconnected_data, mr}] = for {:unconnected_data, _} = i <- items, do: i
     {:ok, response} = MR.decode_response(mr)
-    sockaddrs = for {:sockaddr_o2t, sa} <- items, do: sa
+    sockaddrs = for {tag, _} = i <- items, tag in [:sockaddr_o2t, :sockaddr_t2o], do: i
 
     fo_reply =
       if response.status_name == :success do
@@ -235,7 +236,7 @@ defmodule Eipex.Adapter.IoLoopbackTest do
     {:ok, items} = CPF.decode(rcpf)
     [{:unconnected_data, mr}] = for {:unconnected_data, _} = i <- items, do: i
     {:ok, response} = MR.decode_response(mr)
-    sockaddrs = for {:sockaddr_o2t, sa} <- items, do: sa
+    sockaddrs = for {tag, _} = i <- items, tag in [:sockaddr_o2t, :sockaddr_t2o], do: i
 
     fo_reply =
       if response.status_name == :success do
@@ -281,7 +282,7 @@ defmodule Eipex.Adapter.IoLoopbackTest do
   end
 
   test "forward open succeeds, adapter produces on the RPI", ctx do
-    {fo, response, fo_reply, [%{port: adapter_io_port}]} = io_forward_open(ctx)
+    {fo, response, fo_reply, [{:sockaddr_o2t, %{port: adapter_io_port}}]} = io_forward_open(ctx)
     assert response.status_name == :success
     assert adapter_io_port == ctx.io_port
     assert_receive {:conn_event, :opened}, 500
@@ -379,9 +380,39 @@ defmodule Eipex.Adapter.IoLoopbackTest do
     assert response2.extended == [0x0128, 6]
   end
 
-  test "multicast connections are refused", ctx do
+  test "o2t multicast is refused", ctx do
     {_fo, response, _fo_reply, _sockaddrs} = io_forward_open(ctx, conn_type: :multicast)
     assert response.extended == [0x0123]
+  end
+
+  test "t2o multicast forward open returns the group and produces to it", ctx do
+    {fo, response, fo_reply, sockaddrs} = io_forward_open(ctx, t2o_conn_type: :multicast)
+    assert response.status_name == :success
+
+    # the target assigns the T->O connection id of a multicast producer
+    refute fo_reply.t2o_connection_id == fo.t2o_connection_id
+
+    # the reply announces the group and port where production goes
+    assert [%{ip: {239, 192, 77, 1} = group, port: group_port}] =
+             for({:sockaddr_t2o, sa} <- sockaddrs, do: sa)
+
+    # join the group like a consumer would; production must land there,
+    # stamped with the adapter-assigned connection id
+    {:ok, member} =
+      :gen_udp.open(group_port, [
+        :binary,
+        active: true,
+        reuseaddr: true,
+        add_membership: {group, {127, 0, 0, 1}}
+      ])
+
+    assert_receive {:udp, ^member, _ip, _port, datagram}, 500
+
+    assert {:ok, %{conn_id: conn_id, data: <<0, 0, 0, 0>>}} =
+             Eipex.IO.decode_packet(datagram, false)
+
+    assert conn_id == fo_reply.t2o_connection_id
+    :gen_udp.close(member)
   end
 
   test "path and kind validation", ctx do
@@ -410,7 +441,7 @@ defmodule Eipex.Adapter.IoLoopbackTest do
 
     # the embedded FO's sockaddr_o2t reply item must propagate through the
     # Unconnected Send re-dispatch to the outer encapsulation reply
-    assert [%{port: adapter_io_port}] = sockaddrs
+    assert [{:sockaddr_o2t, %{port: adapter_io_port}}] = sockaddrs
     assert adapter_io_port == ctx.io_port
 
     # T->O production must land on the test's real UDP endpoint, not on a

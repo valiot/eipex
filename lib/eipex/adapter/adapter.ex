@@ -79,6 +79,14 @@ defmodule Eipex.Adapter do
     ]
 
     network = Map.new(Keyword.get(opts, :network, []))
+    io_opts = Keyword.get(opts, :io, [])
+    multicast_opts = Keyword.get(io_opts, :multicast, [])
+
+    multicast = %{
+      group: Keyword.get(multicast_opts, :group, {239, 192, 1, 0}),
+      interface: Keyword.get(multicast_opts, :interface, {0, 0, 0, 0}),
+      ttl: Keyword.get(multicast_opts, :ttl, 1)
+    }
 
     with {:ok, listen} <- :gen_tcp.listen(Keyword.get(opts, :port, 44_818), listen_opts),
          {:ok, resolved_port} <- :inet.port(listen),
@@ -89,17 +97,17 @@ defmodule Eipex.Adapter do
          {:ok, io_udp} <-
            Eipex.Adapter.UDP.start_link(%{
              port: Keyword.get(opts, :io_udp_port, 2222),
-             connections: connections
+             connections: connections,
+             multicast: multicast
            }),
          {:ok, io_sup} <- DynamicSupervisor.start_link(strategy: :one_for_one),
          {:ok, sessions_sup} <- DynamicSupervisor.start_link(strategy: :one_for_one) do
-      io_opts = Keyword.get(opts, :io, [])
-
       io = %{
         udp: io_udp,
         sup: io_sup,
         o2t_run_idle: Keyword.get(io_opts, :o2t_run_idle, true),
-        t2o_run_idle: Keyword.get(io_opts, :t2o_run_idle, false)
+        t2o_run_idle: Keyword.get(io_opts, :t2o_run_idle, false),
+        multicast: multicast
       }
 
       config = %Config{

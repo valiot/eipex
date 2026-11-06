@@ -26,9 +26,10 @@ Add `eipex` to your `mix.exs` dependencies:
 | Class 1 I/O | ✓ | ✓ ¹ |
 | Logix tags (read/write, UDTs) | ✓ | n/a ² |
 
-¹ Exclusive-owner, point-to-point connections only — multicast and
-input-only/listen-only heartbeat connections are deferred (see
-[Known limitations](#known-limitations)).
+¹ Exclusive-owner connections; T→O may be point-to-point or multicast.
+O→T multicast, shared multicast streams (several consumers of one
+producer), and input-only/listen-only heartbeat connections are deferred
+(see [Known limitations](#known-limitations)).
 ² The adapter is a generic CIP target, not a Logix PLC — it does not
 emulate the Symbol/Template objects Logix tags are built on.
 
@@ -68,6 +69,19 @@ data, and sends output:
 
     # Close the connection and stop the process
     :ok = Eipex.Scanner.IOConnection.close(io)
+
+To consume a multicast producer (e.g. an Omron tag data link), request
+`type: :multicast` on the T→O direction; the scanner joins the group the
+target announces in its Forward Open reply:
+
+    {:ok, io} = Eipex.Scanner.open_io(scanner,
+      o_to_t: [assembly: 100, size: 4, rpi: 10_000],
+      t_to_o: [assembly: 101, size: 4, rpi: 10_000, type: :multicast],
+      owner: self()
+    )
+
+`t_to_o` also accepts `interface:` (the local interface for the IGMP join,
+default `{0, 0, 0, 0}`). O→T is always point-to-point.
 
 ## Usage: Logix tags
 
@@ -158,19 +172,27 @@ Implement `Eipex.Adapter.Handler` to validate configuration writes, refresh
 input data before a read, or react to run/idle and connection events —
 unimplemented callbacks fall through to permissive defaults. See
 `Eipex.Adapter` for the remaining `start_link/1` options (`ip`, `network`,
-`discovery`, `max_connections`, `inactivity_timeout`, `objects`).
+`discovery`, `max_connections`, `inactivity_timeout`, `objects`, `io`).
+
+When a scanner requests a multicast T→O connection, the adapter produces to
+the group configured under the `io` option (defaults shown):
+
+    io: [multicast: [group: {239, 192, 1, 0}, interface: {0, 0, 0, 0}, ttl: 1]]
 
 A sample EDS matching this exact configuration ships with the package — see
 [EDS](#eds) below.
 
 ## Known limitations
 
-v0.1.0 ships with the following protocol scope deferred — documented here
-rather than silently missing:
+The following protocol scope is deferred — documented here rather than
+silently missing:
 
-- **Multicast** class 1 I/O — only point-to-point O→T/T→O connections are
-  accepted; a multicast request is refused (CIP error 0x01, extended
-  0x0123/0x0124).
+- **O→T multicast** class 1 I/O — the O→T direction is point-to-point only;
+  a multicast request is refused (CIP error 0x01, extended 0x0123). T→O
+  multicast is supported in both roles, but each adapter connection gets its
+  own producer stream — several consumers sharing one multicast producer, and
+  the ODVA IP-derived multicast address allocation, are deferred (the group
+  is configured, not derived).
 - **Input-only / listen-only** heartbeat connection points — the adapter
   only opens exclusive-owner class 1 connections.
 - **Structure (UDT) writes** — `Eipex.Scanner.Logix.write/4` rejects struct
@@ -196,7 +218,7 @@ Verified against three independent EtherNet/IP implementations:
 - **[OpENer](https://github.com/EIPStackGroup/OpENer)** — ODVA's C
   reference adapter; backs the scanner's class 1 I/O interop.
 
-`mix test` is hermetic (292 tests, 3 properties; interop tests are excluded
+`mix test` is hermetic (296 tests, 3 properties; interop tests are excluded
 by default). To run the tagged interop suites against these:
 
     docker compose -f interop/docker-compose.yml up -d

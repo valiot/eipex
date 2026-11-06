@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.2.0 — 2026-11-06
+
+Multicast class 1 I/O in the T→O direction, in both roles — the transport
+Omron tag data links (and any multicast producer) use. O→T stays
+point-to-point; shared multicast streams and ODVA IP-derived group
+allocation remain deferred (see Known limitations in the README).
+
+### Added
+
+- **Scanner**: `open_io/2` accepts `type: :multicast` (plus `interface:` for
+  the IGMP join) on `:t_to_o`. The scanner joins the multicast group the
+  target announces in its Forward Open reply — on a socket bound to the
+  group address, so it never intercepts unicast traffic on the shared
+  port — and consumes production from it. A reply without a usable group
+  fails the open with `:no_multicast_sockaddr` and releases the accepted
+  connection with a Forward Close. `type: :multicast` on `:o_to_t` is
+  refused locally (`:o2t_multicast_unsupported`).
+- **Adapter**: a Forward Open with a multicast T→O is accepted (O→T
+  multicast still answers 0x01/0x0123). The adapter assigns the T→O
+  connection ID, announces the configured group in the reply's
+  `sockaddr_t2o`, and produces to it. New `io` option:
+  `multicast: [group:, interface:, ttl:]` (defaults
+  `{239, 192, 1, 0}` / `{0, 0, 0, 0}` / `1`).
+
+### Changed
+
+- **Scanner**: the class 1 T→O connection ID is now taken from the Forward
+  Open reply instead of the request — the target owns that ID for multicast
+  connections, and echoes it for point-to-point ones.
+
 ## v0.1.0 — 2026-07-06
 
 First public release: a pure-Elixir EtherNet/IP (CIP) stack with scanner and

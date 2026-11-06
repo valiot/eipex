@@ -45,11 +45,19 @@ defmodule Eipex.Scanner.IOConnection do
 
   @impl true
   def init(args) do
-    {:ok, socket} = :gen_udp.open(0, [:binary, active: true])
-    {:ok, udp_port} = :inet.port(socket)
-
     o2t = Map.new(args.o_to_t)
     t2o = Map.new(args.t_to_o)
+
+    if (o2t[:type] || :point_to_point) == :multicast do
+      {:stop, :o2t_multicast_unsupported}
+    else
+      open(args, o2t, t2o)
+    end
+  end
+
+  defp open(args, o2t, t2o) do
+    {:ok, socket} = :gen_udp.open(0, [:binary, active: true])
+    {:ok, udp_port} = :inet.port(socket)
 
     path_segments =
       [{:class, 0x04}] ++
@@ -64,6 +72,8 @@ defmodule Eipex.Scanner.IOConnection do
       t2o_size: IO.wire_size(t2o.size, t2o[:run_idle] || false),
       o2t_rpi: o2t.rpi,
       t2o_rpi: t2o.rpi,
+      o2t_type: :point_to_point,
+      t2o_type: t2o[:type] || :point_to_point,
       timeout_multiplier: args[:timeout_multiplier] || 2,
       path_segments: path_segments
     }
@@ -74,42 +84,74 @@ defmodule Eipex.Scanner.IOConnection do
 
         {:ok, host} = Eipex.Scanner.host(args.scanner)
         peer = resolve_peer(sockaddrs, host)
+        triad = {fo.connection_serial, fo.originator_vendor_id, fo.originator_serial}
 
-        data = %{
-          socket: socket,
-          owner: args.owner,
-          scanner: args.scanner,
-          o2t_id: reply.o2t_connection_id,
-          t2o_id: fo.t2o_connection_id,
-          triad: {fo.connection_serial, fo.originator_vendor_id, fo.originator_serial},
-          path: fo.connection_path,
-          peer: peer,
-          o2t_run_idle: o2t[:run_idle] || false,
-          t2o_run_idle: t2o[:run_idle] || false,
-          o2t_size: o2t.size,
-          t2o_size: t2o.size,
-          output: :binary.copy(<<0>>, o2t.size),
-          produce_ms: IO.rpi_ms(o2t.rpi),
-          watchdog_ms:
-            IO.rpi_ms(t2o.rpi) * ConnectionManager.timeout_factor(params.timeout_multiplier),
-          prod_seq32: 0,
-          prod_seq16: 0,
-          last_seq32: nil,
-          last_data: nil,
-          run_state: nil
-        }
+        case join_multicast(t2o, sockaddrs) do
+          {:ok, mcast_socket} ->
+            data = %{
+              socket: socket,
+              mcast_socket: mcast_socket,
+              owner: args.owner,
+              scanner: args.scanner,
+              o2t_id: reply.o2t_connection_id,
+              t2o_id: reply.t2o_connection_id,
+              triad: triad,
+              path: fo.connection_path,
+              peer: peer,
+              o2t_run_idle: o2t[:run_idle] || false,
+              t2o_run_idle: t2o[:run_idle] || false,
+              o2t_size: o2t.size,
+              t2o_size: t2o.size,
+              output: :binary.copy(<<0>>, o2t.size),
+              produce_ms: IO.rpi_ms(o2t.rpi),
+              watchdog_ms:
+                IO.rpi_ms(t2o.rpi) * ConnectionManager.timeout_factor(params.timeout_multiplier),
+              prod_seq32: 0,
+              prod_seq16: 0,
+              last_seq32: nil,
+              last_data: nil,
+              run_state: nil
+            }
 
-        {:ok, :running, data,
-         [
-           {{:timeout, :produce}, data.produce_ms, :produce},
-           {{:timeout, :watchdog}, data.watchdog_ms, :watchdog}
-         ]}
+            {:ok, :running, data,
+             [
+               {{:timeout, :produce}, data.produce_ms, :produce},
+               {{:timeout, :watchdog}, data.watchdog_ms, :watchdog}
+             ]}
+
+          {:error, reason} ->
+            # the target accepted the connection; release it before giving up
+            _ = forward_close(%{scanner: args.scanner, triad: triad, path: fo.connection_path})
+            :gen_udp.close(socket)
+            {:stop, reason}
+        end
 
       {:error, reason} ->
         :gen_udp.close(socket)
         {:stop, reason}
     end
   end
+
+  # A multicast T->O connection consumes from the group the target announced
+  # in its reply's sockaddr_t2o, on a socket bound to the group address (so
+  # it never intercepts unicast traffic aimed at the shared port).
+  defp join_multicast(%{type: :multicast} = t2o, sockaddrs) do
+    case for {:sockaddr_t2o, sa} <- sockaddrs, do: sa do
+      [%{ip: {first, _, _, _} = group, port: port} | _] when first in 224..239 ->
+        :gen_udp.open(port, [
+          :binary,
+          active: true,
+          reuseaddr: true,
+          ip: group,
+          add_membership: {group, t2o[:interface] || {0, 0, 0, 0}}
+        ])
+
+      _ ->
+        {:error, :no_multicast_sockaddr}
+    end
+  end
+
+  defp join_multicast(_t2o, _sockaddrs), do: {:ok, nil}
 
   @impl true
   def handle_event({:call, from}, {:set_output, output}, :running, %{o2t_size: size} = data)
@@ -136,6 +178,15 @@ defmodule Eipex.Scanner.IOConnection do
     consume(datagram, data)
   end
 
+  def handle_event(
+        :info,
+        {:udp, socket, _ip, _port, datagram},
+        :running,
+        %{mcast_socket: socket} = data
+      ) do
+    consume(datagram, data)
+  end
+
   def handle_event({:timeout, :produce}, :produce, :running, data) do
     seq32 = IO.next_seq32(data.prod_seq32)
     seq16 = IO.next_seq16(data.prod_seq16)
@@ -157,7 +208,11 @@ defmodule Eipex.Scanner.IOConnection do
   def handle_event(_type, _event, _state, data), do: {:keep_state, data}
 
   @impl true
-  def terminate(_reason, _state, data), do: :gen_udp.close(data.socket)
+  def terminate(_reason, _state, data) do
+    :gen_udp.close(data.socket)
+    if data.mcast_socket, do: :gen_udp.close(data.mcast_socket)
+    :ok
+  end
 
   # -- Internal helpers ----------------------------------------------------------
 

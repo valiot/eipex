@@ -144,15 +144,36 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
            validate_io_size(fo.o2t_params.size, out_size, ctx.config.io.o2t_run_idle, 0x0127),
          :ok <- validate_io_size(fo.t2o_params.size, in_size, ctx.config.io.t2o_run_idle, 0x0128),
          :ok <- validate_no_conflict(ctx, o2t_asm),
-         {:ok, peer} <- resolve_peer(ctx) do
-      start_io_connection(fo, ctx, o2t_asm, t2o_asm, peer)
+         {:ok, production} <- resolve_production(fo, ctx) do
+      start_io_connection(fo, ctx, o2t_asm, t2o_asm, production)
     else
-      # only resolve_peer returns a bare :error; every other step above
+      # only resolve_production returns a bare :error; every other step above
       # already yields a complete {:error, status, extended} tuple
       :error -> {:error, 0x01, [0x0110]}
       {:error, _status, _extended} = error -> error
     end
   end
+
+  # Where T->O production goes, which connection id stamps it, and which
+  # sockaddr items the reply must carry. Point-to-point: the originator's
+  # endpoint and its proposed t2o id. Multicast: the configured group (spec
+  # 3-5.4: the target owns both the group address and the t2o id).
+  defp resolve_production(%{t2o_params: %{type: :multicast}}, ctx) do
+    group = ctx.config.io.multicast.group
+    {:ok, port} = Eipex.Adapter.UDP.port(ctx.config.io.udp)
+    t2o_id = Bitwise.band(:erlang.unique_integer([:positive]), 0xFFFF_FFFF)
+
+    {:ok, %{peer: {group, port}, t2o_id: t2o_id, sockaddrs: [sockaddr_t2o(group, port)]}}
+  end
+
+  defp resolve_production(fo, ctx) do
+    case resolve_peer(ctx) do
+      {:ok, peer} -> {:ok, %{peer: peer, t2o_id: fo.t2o_connection_id, sockaddrs: []}}
+      :error -> :error
+    end
+  end
+
+  defp sockaddr_t2o(ip, port), do: {:sockaddr_t2o, %{ip: ip, port: port}}
 
   defp validate_no_conflict(ctx, o2t_asm) do
     if Eipex.Adapter.ConnectionTable.io_owns_assembly?(ctx.connections, o2t_asm) do
@@ -165,7 +186,7 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
   defp validate_io_types(fo) do
     cond do
       fo.o2t_params.type != :point_to_point -> {:error, 0x01, [0x0123]}
-      fo.t2o_params.type != :point_to_point -> {:error, 0x01, [0x0124]}
+      fo.t2o_params.type not in [:point_to_point, :multicast] -> {:error, 0x01, [0x0124]}
       true -> :ok
     end
   end
@@ -225,7 +246,7 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
     end
   end
 
-  defp start_io_connection(fo, ctx, o2t_asm, t2o_asm, peer) do
+  defp start_io_connection(fo, ctx, o2t_asm, t2o_asm, production) do
     triad = {fo.connection_serial, fo.originator_vendor_id, fo.originator_serial}
 
     args = %{
@@ -234,7 +255,7 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
       handler: ctx.handler,
       udp: ctx.config.io.udp,
       triad: triad,
-      t2o_id: fo.t2o_connection_id,
+      t2o_id: production.t2o_id,
       o2t_assembly: o2t_asm,
       t2o_assembly: t2o_asm,
       o2t_size: fo.o2t_params.size - overhead(ctx.config.io.o2t_run_idle),
@@ -248,7 +269,7 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
       DynamicSupervisor.start_child(ctx.config.io.sup, {Eipex.Adapter.IoConnection, args})
 
     info = %{
-      t2o_connection_id: fo.t2o_connection_id,
+      t2o_connection_id: production.t2o_id,
       kind: :io,
       pid: statem,
       o2t_assembly: o2t_asm
@@ -260,20 +281,20 @@ defmodule Eipex.Adapter.Object.ConnectionManager do
     # means both monitor paths point at the statem.
     case Eipex.Adapter.ConnectionTable.register(ctx.connections, triad, info, statem) do
       {:ok, o2t_id} ->
-        Eipex.Adapter.IoConnection.activate(statem, o2t_id, peer)
+        Eipex.Adapter.IoConnection.activate(statem, o2t_id, production.peer)
         {:ok, udp_port} = Eipex.Adapter.UDP.port(ctx.config.io.udp)
 
         {:reply,
          CM.encode_forward_open_reply(%CM.ForwardOpenReply{
            o2t_connection_id: o2t_id,
-           t2o_connection_id: fo.t2o_connection_id,
+           t2o_connection_id: production.t2o_id,
            connection_serial: fo.connection_serial,
            originator_vendor_id: fo.originator_vendor_id,
            originator_serial: fo.originator_serial,
            o2t_api: fo.o2t_rpi,
            t2o_api: fo.t2o_rpi,
            application_reply: <<>>
-         }), [{:sockaddr_o2t, %{ip: {0, 0, 0, 0}, port: udp_port}}]}
+         }), [{:sockaddr_o2t, %{ip: {0, 0, 0, 0}, port: udp_port}} | production.sockaddrs]}
 
       {:error, :duplicate} ->
         :gen_statem.stop(statem)

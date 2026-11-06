@@ -21,8 +21,14 @@ defmodule Eipex.Adapter.UDP do
   def send(server, ip, port, packet), do: GenServer.cast(server, {:send, ip, port, packet})
 
   @impl true
-  def init(%{port: port, connections: connections}) do
-    case :gen_udp.open(port, [:binary, active: true, reuseaddr: true]) do
+  def init(%{port: port, connections: connections} = init_arg) do
+    multicast_opts =
+      case init_arg[:multicast] do
+        %{interface: interface, ttl: ttl} -> [multicast_if: interface, multicast_ttl: ttl]
+        nil -> []
+      end
+
+    case :gen_udp.open(port, [:binary, active: true, reuseaddr: true] ++ multicast_opts) do
       {:ok, socket} -> {:ok, %{socket: socket, connections: connections}}
       {:error, reason} -> {:stop, reason}
     end

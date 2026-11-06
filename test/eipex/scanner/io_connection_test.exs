@@ -98,6 +98,85 @@ defmodule Eipex.Scanner.IOConnectionTest do
     Scanner.close(scanner)
   end
 
+  test "consumes t2o multicast production" do
+    group = {239, 192, 77, 2}
+
+    {adapter, scanner} =
+      start_pair(io: [multicast: [group: group, interface: {127, 0, 0, 1}, ttl: 1]])
+
+    :ok = Eipex.Adapter.write_assembly(adapter, 100, <<7, 7, 7, 7>>)
+
+    assert {:ok, io} =
+             open_io(scanner,
+               t_to_o: [
+                 assembly: 100,
+                 size: 4,
+                 rpi: 20_000,
+                 run_idle: false,
+                 type: :multicast,
+                 interface: {127, 0, 0, 1}
+               ]
+             )
+
+    # an independent observer in the group proves production is multicast,
+    # not a point-to-point fallback; binding the group address keeps it from
+    # intercepting any unicast traffic on the shared port
+    {:ok, io_port} = Eipex.Adapter.io_udp_port(adapter)
+
+    {:ok, observer} =
+      :gen_udp.open(io_port, [
+        :binary,
+        active: true,
+        reuseaddr: true,
+        ip: group,
+        add_membership: {group, {127, 0, 0, 1}}
+      ])
+
+    assert_receive {:udp, ^observer, _ip, _port, datagram}, 1_000
+    assert {:ok, %{data: <<7, 7, 7, 7>>}} = Eipex.IO.decode_packet(datagram, false)
+
+    # the scanner consumed the same group
+    assert_receive {:eipex_io, ^io, :data, <<7, 7, 7, 7>>}, 1_000
+
+    # o2t output still flows point-to-point
+    :ok = Eipex.Scanner.IOConnection.set_output(io, <<4, 3, 2, 1>>)
+
+    assert eventually(fn ->
+             Eipex.Adapter.read_assembly(adapter, 150) == {:ok, <<4, 3, 2, 1>>}
+           end)
+
+    :gen_udp.close(observer)
+    assert :ok = Eipex.Scanner.IOConnection.close(io)
+    Scanner.close(scanner)
+  end
+
+  test "a target announcing no usable multicast group yields an error and releases the connection" do
+    # a non-multicast "group" makes the adapter's sockaddr_t2o unusable
+    {_adapter, scanner} =
+      start_pair(io: [multicast: [group: {192, 168, 50, 1}, interface: {127, 0, 0, 1}, ttl: 1]])
+
+    t2o = [assembly: 100, size: 4, rpi: 20_000, run_idle: false, type: :multicast]
+    assert {:error, :no_multicast_sockaddr} = open_io(scanner, t_to_o: t2o)
+
+    # the failed attempt must have forward-closed on the target: a second
+    # open of the same assembly pair would hit the exclusive-owner conflict
+    # (0x0106) if the connection had leaked
+    assert {:ok, io} = open_io(scanner)
+    Eipex.Scanner.IOConnection.close(io)
+    Scanner.close(scanner)
+  end
+
+  test "o2t multicast is not supported" do
+    {_adapter, scanner} = start_pair()
+
+    assert {:error, :o2t_multicast_unsupported} =
+             open_io(scanner,
+               o_to_t: [assembly: 150, size: 4, rpi: 20_000, run_idle: true, type: :multicast]
+             )
+
+    Scanner.close(scanner)
+  end
+
   test "forward open rejections surface as errors" do
     {_adapter, scanner} = start_pair()
 

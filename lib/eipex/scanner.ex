@@ -144,7 +144,12 @@ defmodule Eipex.Scanner do
       microseconds) and `:size` (assembly data size in bytes) all required;
       optionally `:run_idle` (boolean, defaults to false).
     * `:t_to_o` — target-to-originator assembly config (required). Same
-      structure as `:o_to_t`.
+      structure as `:o_to_t`, plus optionally `:type` (`:point_to_point`,
+      the default, or `:multicast`) and `:interface` (local interface for
+      the multicast IGMP join, defaults to `{0, 0, 0, 0}`). For a multicast
+      connection the scanner joins the group the target announces in its
+      Forward Open reply and consumes production from there; a reply without
+      a usable group fails the open with `:no_multicast_sockaddr`.
     * `:config` — optional configuration assembly instance, as a keyword list
       with `:assembly` key.
     * `:timeout_multiplier` — optional integer watchdog multiplier (defaults
@@ -167,8 +172,10 @@ defmodule Eipex.Scanner do
 
   ## Connection scope
 
-  Implicit I/O connections are point-to-point and exclusive-owner; only one
-  scanner can open to a given target assembly pair at a time.
+  Implicit I/O connections are exclusive-owner; only one scanner can open to
+  a given target assembly pair at a time. O→T is always point-to-point
+  (`type: :multicast` on `:o_to_t` returns `{:error,
+  :o2t_multicast_unsupported}`); T→O may be point-to-point or multicast.
 
   To set output data, call `Eipex.Scanner.IOConnection.set_output/2` with the
   returned pid. To close the connection and stop the process, call
@@ -916,9 +923,9 @@ defmodule Eipex.Scanner do
       originator_serial: state.serial_number,
       timeout_multiplier: params.timeout_multiplier,
       o2t_rpi: params.o2t_rpi,
-      o2t_params: io_connection_params(params.o2t_size),
+      o2t_params: io_connection_params(params.o2t_size, params.o2t_type),
       t2o_rpi: params.t2o_rpi,
-      t2o_params: io_connection_params(params.t2o_size),
+      t2o_params: io_connection_params(params.t2o_size, params.t2o_type),
       transport: %{direction: :server, trigger: :cyclic, class: 1},
       connection_path: Path.encode(params.path_segments)
     }
@@ -926,10 +933,10 @@ defmodule Eipex.Scanner do
     {fo, %{state | connection_serial_counter: serial + 1}}
   end
 
-  defp io_connection_params(size),
+  defp io_connection_params(size, type),
     do: %{
       owner: :exclusive,
-      type: :point_to_point,
+      type: type,
       priority: :low,
       size_type: :fixed,
       size: size
